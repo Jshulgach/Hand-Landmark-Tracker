@@ -7,9 +7,10 @@ This program uses openCV and mediapipe to acquire hand landmarks and post/gestur
 
 Detector in action.
 <figure>
-  <img src="https://github.com/Jshulgach/Hand-Landmark-Tracker/blob/main/media/hands.gif" alt="Hand" width="711" height="400"><br>
+  <img src="https://github.com/Jshulgach/Hand-Landmark-Tracker/blob/main/media/hand-demo.gif" alt="Hand" width="500" height="400"><br>
   <figcaption>Landmark tracking. Multi-hand classification and landmark identification.</figcaption>
 </figure>
+
 
 
 ## Getting Started
