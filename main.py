@@ -13,6 +13,11 @@ from utils import FrontUI, Landmarks
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 DEFAULT_AXIS_DRAWING_SPEC = mp_drawing.DrawingSpec()
+MAX_PINCH_DIST = 0.2
+MIN_PINCH_DIST = 0.05
+MAX_GRIPPER = 180
+MIN_GRIPPER = 140
+
 
 WHITE_COLOR = (224, 224, 224)
 BLACK_COLOR = (0, 0, 0)
@@ -27,6 +32,9 @@ instructions = """Instructions:
  - Input an IP address and enable the "Stream" checkbox to stream the landmark data
 """
 print(instructions)
+
+def interpolation(d, x):
+    return round(d[0][1] + (x - d[0][0]) * ((d[1][1] - d[0][1])/(d[1][0] - d[0][0])))
 
 
 class MainWindow(QtWidgets.QDialog, FrontUI):
@@ -44,7 +52,7 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
             width in pixels of obtained frame from camera.
     """
 
-    def __init__(self, name='Hand Tracker', cap=None, cam_height=480, cam_width=640, verbose=False):
+    def __init__(self, name='Hand Tracker', rate=10, cap=None, cam_height=480, cam_width=640, verbose=False):
         super().__init__()
         self.name = name
         self.verbose = verbose
@@ -58,6 +66,7 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
 
         # Set up socket client attributes (IP address comes from GUI input)
         # self.HOST = self.ip_edit.text()
+        self.rate = rate
         self.toc = 0.0
         self.PORT = 5000
         self._server_connected = False
@@ -139,26 +148,39 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
                         index_mcp = self.get_landmark_pos(results, "INDEX_FINGER_MCP")
                         index_tip = self.get_landmark_pos(results, "INDEX_FINGER_TIP")
                         thumb_tip = self.get_landmark_pos(results, "THUMB_TIP")
-                        #pinky_mcp = self.get_landmark_pos(results, "PINKY_MCP")
+                        #pinky_mcp = self.get_landmark_pos(results, "PINKY_MCP") # Not used
 
+                        # Get the position of the wrist landmark
+                        x, y, z = self.hand_position(wrist_lm)
+                        #print("{}, {}, {}".format(x, y, z))
+
+                        # Get hand orientation components
                         roll, pitch, yaw = self.hand_orientation(thumb_mcp, index_mcp, wrist_lm)
-                        pinch_dist = self.get_diff(thumb_tip, index_tip)
-                        pinch_dist = round(pinch_dist, 2)
 
-                        x = round(wrist_lm[0], 2)
-                        y = round(wrist_lm[1], 2)
-                        z = round(1000000*wrist_lm[2], 4)
+                        # Get the pinch distance and map it to the gripper position
+                        pinch_dist = round(self.get_diff(thumb_tip, index_tip), 2)
+                        grip_pos = interpolation([[MIN_PINCH_DIST, MIN_GRIPPER], [MAX_PINCH_DIST, MAX_GRIPPER]], pinch_dist)
 
                         tic = time.perf_counter()
-                        if self._enable_stream:
-                            if tic - self.toc > 0.1:
+                        if True:
+                        #if self._enable_stream:
                                 if results.multi_hand_landmarks:
-                                    if self._server_connected:
+                                    # Build robot controller commands here, makes parsing simpler
+                                    #i = "GRIPPER:{};POSITION:{},{},{};ROTATION:{},{},{};".format(pinch_dist, x, y, z, round(roll, 1), round(pitch, 1), round(yaw), 1)
+                                    #i = "gripper:{};delta:{},{},{},{},{},{};".format(grip_pos, 0, 0, z, 0, 0, 0)
+
+                                    # First argument is enable/disable posture tracking. This would be changed by open/closed hand
+                                    # Center of the screen is considered 0 for all axes in terms of displacement. Robot will be displaced using its starting configuration as a reference.
+                                    # Future iteration of the posture command will allow restarting posture commands with teh current robot position as a reference
+                                    #i = "led:0,0,100;"
+                                    i = "posture:{},{},{},{},{},{};".format(x, y, z, 0, 0, 0)
+                                    self.logger(i)
+                                    #i = "gripper:{};delta:{},{},{},{},{},{};".format(grip_pos, x, y, z, round(roll, 1), round(pitch, 1), round(yaw,1))
+                                    if tic - self.toc > 1/self.rate:
+                                        self.logger("SEND")
                                         self.toc = time.perf_counter()
-                                        self.logger("Streaming data: \n")
-                                        i = "GRIPPER:{};POSITION:{},{},{};ROTATION:{},{},{};".format(pinch_dist, x, y, z, round(roll, 1), round(pitch, 1), round(yaw), 1)
-                                        print(i)
-                                        self.s.send(str(i).encode('utf-8'))
+                                        if self._server_connected and self._enable_stream:
+                                            self.s.send(str(i).encode('utf-8'))
 
                 self.display_image(image, True)  # Update the GUI with the webcam image
 
@@ -189,7 +211,7 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
                 lm = hand_landmarks.landmark
                 return [lm[Landmarks[key]].x, lm[Landmarks[key]].y, lm[Landmarks[key]].z]
 
-    def hand_orientation(self, p1, p2, p3, unit='degrees'):
+    def hand_orientation(self, p1, p2, p3, unit='degrees', orientation='front'):
         """ Function that returns the roll, pitch, and yaw of the palm landmarks. Math steps from Matlab forums:
              https://www.mathworks.com/matlabcentral/answers/298940-how-to-calculate-roll-pitch-and-yaw-from-xyz-coordinates-of-3-planar-points
              Note that this function took a long time to figure out and the result is somewhat simple, but this only
@@ -226,6 +248,9 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
         pitch = math.asin(rotation[2][0])
         yaw = math.atan2(-rotation[1][0], rotation[0][0])
 
+        if orientation == 'front':
+            pitch = -1 * (pitch + np.pi/4)
+
         if unit == 'degrees':
             roll *= 180 / np.pi
             pitch *= 180 / np.pi
@@ -248,8 +273,38 @@ class MainWindow(QtWidgets.QDialog, FrontUI):
         """
         return np.sqrt((thumb_tip[0]-index_tip[0])**2 + (thumb_tip[1]-index_tip[1])**2 + (thumb_tip[2]-index_tip[2])**2)
 
+    def hand_position(self, lm, orientation='front'):
+        """ This function will take the inputs of the passed landmark as a list containing x, y, z components and remap
+        them to values from -5 to 5. Camera orientation determines whether second and third elements of the landmark are
+        swapped for the roles of y and z.
+
+        Args:
+            lm (list): List containing the x, y, and z coordinates of the landmark
+            orientation (str): Orientation of the camera. Can be 'front' or 'top'
+
+        Returns:
+            list: List containing the remapped x, y, and z coordinates of the landmark
+        """
+        MAX = 100
+        OFFSET = 50
+
+        z_scale = 1000000
+        x = round(lm[0] * 2*MAX - MAX, 2)
+        y = -1 * round(lm[1] * 2*MAX - MAX, 2)
+        z = round(z_scale * lm[2] * 2*MAX - MAX + OFFSET, 2)
+
+
+        if orientation == 'front':
+            y, z = z, y
+            x, y = y, x
+
+        return [x, y, z]
+
+
+
+
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
-    window = MainWindow(verbose=False)
+    window = MainWindow(rate=4, verbose=False)
     sys.exit(app.exec_())
