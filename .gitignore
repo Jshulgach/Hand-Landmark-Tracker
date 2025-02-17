@@ -1,4 +1,10 @@
+# system cache files
 android
 __pycache__
+
+# virtual environments
 .idea
 venv
+.venv
+.hand-tracker
+
