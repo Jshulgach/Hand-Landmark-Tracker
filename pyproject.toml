@@ -1,0 +1,48 @@
+[project]
+name = "handtrack"
+version = "0.0.3.10"
+description = "A Python package for tracking hand landmarks in images and videos."
+authors = [
+    { name="Jonathan Shulgach", email="jonathan@shulgach.com" }
+]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.5.0",
+    "mediapipe",
+    "numpy>=1.26.0",
+    "scipy>=1.5.0",
+    "matplotlib",
+    "pyyaml",
+    "PyQt5>=5.15",
+    "pyqtgraph",
+    "PyOpenGL",
+    "tqdm",
+    #"torchvision",
+]
+
+[project.urls]
+Homepage = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
+Repository = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
+Issues = "https://github.com/Jshulgach/Hand-Landmark-Tracker/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+#[project.optional-dependencies]
+#docs = [
+#    "sphinx",
+#    "sphinx-autodoc-typehints",
+#    "myst-parser",
+#]
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"handtrack" = ["*.yaml", "*.json", "*.csv", "*.ui"]  # include config and UI files if needed
