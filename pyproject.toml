@@ -1,6 +1,6 @@
 [project]
 name = "handtrack"
-version = "0.0.3.1"
+version = "0.1.0"
 description = "A Python package for tracking hand landmarks in images and videos."
 authors = [
     { name="Jonathan Shulgach", email="jonathan@shulgach.com" }
