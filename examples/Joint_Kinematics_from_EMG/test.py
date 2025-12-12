@@ -1,147 +1,150 @@
 """
-overlay_landmarks_video.py
+visualize_joint_angles_overlay.py
 
-Overlays smoothed landmarks onto the video frames.
-Each landmark sample is mapped directly to a single frame (1:1).
-This ensures the video frames and landmark samples are synchronized visually.
-
+Overlays predicted vs ground-truth joint angles onto video frames using a trained EMG model.
 Author: Jonathan Shulgach
-Date: 06/03/25
+Date: 06/15/25
 """
 
+import os
 import numpy as np
+import pickle
 import cv2
 import torch
-from src.handtrack.ml import EMGRegressor
+import logging
+import argparse
+from scipy.interpolate import interp1d
+from handtrack.ml import EMGRegressor
 
-# ---------- CONFIG ----------
-VIDEO_PATH = r"G:\Shared drives\NML_shared\DataShare\HDEMG Human Healthy\Open_Ephys\Jonathan\2025_05_07\media\HandDynamic.mp4"
-LANDMARKS_FILE = '../../data/HandDynamic_smoothed_landmarks.npz'
-EMG_DATA_FILE = '../../data/hand_dynamic_dataset.npz'
-MODEL_PATH = '../../data/emg_regressor.pth'
-SCALER_MEAN_PATH = '../../data/feature_scaler.npy'
-SCALER_STD_PATH = '../../data/feature_scaler_std.npy'
 
-# ---------- LOAD DATA ----------
-print("Loading landmarks...")
-landmarks_data = np.load(LANDMARKS_FILE)
-landmarks = landmarks_data['landmarks']
-lm_fs = int(landmarks_data['sampling_rate'])
-print(f"Loaded landmarks shape: {landmarks.shape} at {lm_fs} Hz.")
+ANGLE_NAMES = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
 
-print("Loading EMG features...")
-emg_data = np.load(EMG_DATA_FILE)
-emg_features = emg_data['emg_features']
-print(f"Loaded EMG features shape: {emg_features.shape}")
 
-print("Loading model and scaler...")
-mean = np.load(SCALER_MEAN_PATH)
-std = np.load(SCALER_STD_PATH)
-scaler = lambda x: (x - mean) / std
+def parse_events_file(file_path):
+    start_idx, end_idx = None, None
+    with open(file_path, 'r') as f:
+        next(f)
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) < 3:
+                continue
+            sample_index_str, _, label = parts
+            if label == 'Start' and start_idx is None:
+                start_idx = int(sample_index_str)
+            elif label == 'End' and end_idx is None:
+                end_idx = int(sample_index_str)
+            if start_idx is not None and end_idx is not None:
+                break
+    return start_idx, end_idx
 
-# Load model
-model = EMGRegressor(emg_features.shape[1], landmarks.shape[1] * landmarks.shape[2])
-model.load_state_dict(torch.load(MODEL_PATH))
-model.eval()
 
-# Scale EMG features
-X_scaled = scaler(emg_features)
-X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+def setup_logger():
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
-print("Predicting landmarks from EMG...")
-with torch.no_grad():
-    predicted_landmarks = model(X_tensor).numpy().reshape((-1, 21, 3))
-print(f"Predicted landmarks shape: {predicted_landmarks.shape}")
 
-# ---------- HAND CONNECTIONS ----------
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),       # Thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),       # Index
-    (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
-    (0, 13), (13, 14), (14, 15), (15, 16),# Ring
-    (0, 17), (17, 18), (18, 19), (19, 20) # Pinky
-]
+def run_visualization(root_dir, label="HandDynamic"):
+    setup_logger()
+    logging.info(f"Using label: {label}")
 
-# ---------- LOAD VIDEO ----------
-cap = cv2.VideoCapture(VIDEO_PATH)
-assert cap.isOpened(), "Failed to open video file."
+    # Define paths
+    video_path = os.path.join(root_dir, 'media', f"{label}.mp4")
+    dataset_path = os.path.join(root_dir, f"{label}_feature_dataset.npz")
+    model_path = os.path.join(root_dir, 'model', f"{label}_emg_regressor.pth")
+    scaler_path = os.path.join(root_dir, 'model', f"{label}_scaler.pkl")
+    sync_offset_file = os.path.join(root_dir, 'events', f"{label}_sync_offset.txt")
+    events_file = os.path.join(root_dir, 'events', f"{label}_video_events.txt")
 
-video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-print(f"Video has {video_frame_count} frames at {video_fps:.2f} fps.")
+    # Sanity check
+    for f in [video_path, dataset_path, model_path, scaler_path, sync_offset_file, events_file]:
+        if not os.path.exists(f):
+            raise FileNotFoundError(f"Missing required file: {f}")
 
-# Calculate approximate video time vector
-video_time = np.arange(video_frame_count) / video_fps
+    # Load start frame index
+    start_frame_index, _ = parse_events_file(events_file)
+    logging.info(f"Parsed start frame index from video events: {start_frame_index}")
 
-# Calculate approximate landmark time vector
-lm_time = np.arange(landmarks.shape[0]) / lm_fs
+    # Load sync offset
+    with open(sync_offset_file, 'r') as f:
+        sync_offset = float(f.readline().split(': ')[1].split(' ')[0])
+    logging.info(f"Loaded sync offset: {sync_offset:.3f} seconds.")
 
-# Calculate approximate EMG feature time vector
-emg_fs = 5000  # Default, adjust if stored somewhere
-window_ms = 50  # Should match dataset creation
-step_ms = 20
-window_size = int(window_ms * emg_fs / 1000)
-step_size = int(step_ms * emg_fs / 1000)
-emg_time = np.arange(emg_features.shape[0]) * (step_size / emg_fs)
+    # Load EMG + angles
+    data = np.load(dataset_path)
+    emg_features = data['emg_features']
+    ground_truth_angles = data['landmark_labels']  # Now joint angles
+    emg_fs = int(data.get('emg_fs', 5000))
+    window_ms = int(data.get('window_ms', 50))
+    step_ms = int(data.get('step_ms', 10))
+    window_size = int(window_ms * emg_fs / 1000)
+    step_size = int(step_ms * emg_fs / 1000)
 
-# Align EMG predictions with video frames (simple nearest-neighbor matching)
-frame_indices = np.round(video_time * (1 / (step_size / emg_fs))).astype(int)
-frame_indices = np.clip(frame_indices, 0, emg_features.shape[0] - 1)
+    logging.info(f"Loaded EMG features: {emg_features.shape} | Angle labels: {ground_truth_angles.shape}")
 
-total_frames = min(video_frame_count, landmarks.shape[0])
-print(f"Using {total_frames} frames for overlay.")
+    # Load scaler
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
 
-frame_idx = 0
-print("Starting overlay visualization... Press ESC to exit.")
-while cap.isOpened() and frame_idx < total_frames:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    # Load model
+    model = EMGRegressor(emg_features.shape[1], ground_truth_angles.shape[1])
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
 
-    # Ground-truth landmark
-    gt_landmark_frame = landmarks[frame_idx]
+    # Load video
+    cap = cv2.VideoCapture(video_path)
+    assert cap.isOpened(), f"Failed to open video file: {video_path}"
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    logging.info(f"Video has {frame_count} frames at {video_fps:.2f} fps.")
 
-    # Predicted landmark
-    emg_idx = frame_indices[frame_idx]
-    pred_landmark_frame = predicted_landmarks[emg_idx]
+    # Align EMG to video using time offset
+    emg_time = np.arange(emg_features.shape[0]) * (step_size / emg_fs)
+    video_time = np.arange(frame_count) / video_fps - sync_offset
+    interp_func = interp1d(emg_time, emg_features, axis=0, kind='linear', fill_value='extrapolate')
+    emg_features_interpolated = interp_func(video_time)
 
-    # Draw ground-truth landmarks (blue)
-    for lm in gt_landmark_frame:
-        cx = int(lm[0] * frame.shape[1])
-        cy = int(lm[1] * frame.shape[0])
-        cv2.circle(frame, (cx, cy), 4, (255, 0, 0), -1)  # Blue
+    # Predict angles
+    X_scaled = scaler.transform(emg_features_interpolated)
+    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+    with torch.no_grad():
+        predicted_angles = model(X_tensor).numpy()
 
-    # Draw predicted landmarks (cyan)
-    for lm in pred_landmark_frame:
-        cx = int(lm[0] * frame.shape[1])
-        cy = int(lm[1] * frame.shape[0])
-        cv2.circle(frame, (cx, cy), 4, (255, 255, 0), -1)  # Cyan
+    # Overlay loop
+    frame_idx = 0
+    logging.info("Beginning visualization... press ESC to quit.")
+    while cap.isOpened() and frame_idx < min(frame_count, len(predicted_angles)):
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    # Draw connections for ground-truth (blue)
-    for connection in HAND_CONNECTIONS:
-        idx_start, idx_end = connection
-        x0 = int(gt_landmark_frame[idx_start][0] * frame.shape[1])
-        y0 = int(gt_landmark_frame[idx_start][1] * frame.shape[0])
-        x1 = int(gt_landmark_frame[idx_end][0] * frame.shape[1])
-        y1 = int(gt_landmark_frame[idx_end][1] * frame.shape[0])
-        cv2.line(frame, (x0, y0), (x1, y1), (255, 0, 0), 2)
+        if frame_idx >= start_frame_index:
+            pred = np.degrees(predicted_angles[frame_idx])
+            gt = np.degrees(ground_truth_angles[frame_idx])
 
-    # Draw connections for predicted (cyan)
-    for connection in HAND_CONNECTIONS:
-        idx_start, idx_end = connection
-        x0 = int(pred_landmark_frame[idx_start][0] * frame.shape[1])
-        y0 = int(pred_landmark_frame[idx_start][1] * frame.shape[0])
-        x1 = int(pred_landmark_frame[idx_end][0] * frame.shape[1])
-        y1 = int(pred_landmark_frame[idx_end][1] * frame.shape[0])
-        cv2.line(frame, (x0, y0), (x1, y1), (255, 255, 0), 2)
+            for i, joint in enumerate(ANGLE_NAMES):
+                text_gt = f"{joint} (GT): {gt[i]:.1f}°"
+                text_pred = f"{joint}: {pred[i]:.1f}°"
+                y_pos = 40 + i * 30
+                cv2.putText(frame, text_gt, (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                cv2.putText(frame, text_pred, (300, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    cv2.imshow("Landmark Overlay", frame)
-    if cv2.waitKey(int(1000 / video_fps)) & 0xFF == 27:
-        break
+        # Add frame info
+        cv2.putText(frame, f"Frame: {frame_idx}/{frame_count}", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
 
-    frame_idx += 1
+        # Show frame
+        cv2.imshow("Joint Angle Overlay", frame)
+        if cv2.waitKey(int(1000 / video_fps)) & 0xFF == 27:
+            break
+        frame_idx += 1
 
-cap.release()
-cv2.destroyAllWindows()
+    cap.release()
+    cv2.destroyAllWindows()
+    logging.info("Visualization complete.")
 
-print("Visualization complete!")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Overlay EMG-predicted joint angles on video")
+    parser.add_argument('--root_dir', type=str, required=True, help='Directory with model/data')
+    parser.add_argument('--label', type=str, default="HandDynamic", help='Dataset/video label prefix')
+    args = parser.parse_args()
+    run_visualization(args.root_dir, args.label)

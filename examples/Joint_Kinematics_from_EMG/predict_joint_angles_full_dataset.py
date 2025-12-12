@@ -68,7 +68,7 @@ step_ms = 10
 step_size = int(step_ms * emg_fs / 1000)
 emg_time = np.arange(emg_features.shape[0]) * (step_size / emg_fs)# + sync_offset
 
-video_time = np.arange(landmarks.shape[0]) / video_fps + sync_offset # Match video frames to landmarks
+video_time = np.arange(landmarks.shape[0]) / video_fps + sync_offset  # Match video frames to landmarks
 
 # Downsample EMG features to match landmark samples
 frame_to_emg_idx = np.searchsorted(emg_time, video_time, side='right') - 1

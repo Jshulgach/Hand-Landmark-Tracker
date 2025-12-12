@@ -3,6 +3,7 @@ import cv2
 import csv
 import mediapipe as mp
 import numpy as np
+from tqdm import tqdm
 import time
 from handtrack.processing import Kalman3D, compute_all_joint_angles
 
@@ -13,7 +14,7 @@ class HandTracker:
 
     Supports Kalman filtering for smoothing landmark trajectories and joint angle computation.
     """
-    def __init__(self, source=0, img_size=(1080, 720), video_fps=30, max_hands=1, confidence=0.5, apply_kalman=True,
+    def __init__(self, source=0, img_size=(1080, 720), video_fps=30, max_hands=1, confidence=0.8, apply_kalman=True,
                  save_angles=False, out_path='angles.csv', verbose=False):
         """
         Initializes the HandTracker.
@@ -45,7 +46,7 @@ class HandTracker:
             raise ValueError(f"Cannot open video source: {source}")
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, img_size[0])
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, img_size[1])
-        self.cap.set(cv2.CAP_PROP_FPS, video_fps)  # Set FPS to 30 for consistency
+        #self.cap.set(cv2.CAP_PROP_FPS, video_fps)  # Set FPS to 30 for consistency
         if self.verbose:
             print(f"Using video source: {source} (mode: {self.mode})")
 
@@ -53,7 +54,7 @@ class HandTracker:
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=max_hands,
             min_detection_confidence=confidence,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=0.8
         )
 
         # Initialize filters and state
@@ -62,7 +63,7 @@ class HandTracker:
         self.last_angles = None  # For histogram
         self.landmarks_filtered = None  # Store filtered landmarks for visualization
 
-    def extract_landmarks(self, visualize=False, save_video=False):
+    def extract_landmarks(self, visualize=False, save_video=False, flip_frame=False):
         """
         Extracts hand landmarks from the video source.
 
@@ -84,6 +85,9 @@ class HandTracker:
         frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+        pbar = tqdm(total=total_frames if total_frames > 0 else None,
+                    desc="Processing frames", unit="frame")
+
         # Optional video writer
         if save_video:
             base_path = os.path.splitext(os.path.basename(self.source))[0]
@@ -94,11 +98,16 @@ class HandTracker:
         else:
             out_writer = None
 
+        if visualize:
+            print(F"visualize: {visualize}, save_video: {save_video}")
+
         raw_landmarks = []
         smooth_landmarks = []
+        frame_idx = 0
         while self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if not ret:
+            frame = self.get_image(flip_frame=flip_frame)
+            if frame is None:
+                print("No more frames to read.")
                 break
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -134,6 +143,10 @@ class HandTracker:
                     for x, y, _ in filtered_frame:
                         cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, (255, 255, 255), -1)
 
+                # Show the frame index on the frame
+                cv2.putText(frame, f"Frame: {frame_idx + 1}/{total_frames}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
                 if visualize:
                     cv2.imshow("Raw Hand Landmarks", frame)
                     if cv2.waitKey(1) & 0xFF == 27:
@@ -142,13 +155,18 @@ class HandTracker:
             if save_video and out_writer is not None:
                 out_writer.write(frame)
 
+            frame_idx += 1
+            pbar.update(1)  # NEW: advance progress
+
         self.cap.release()
+        pbar.close()
         if out_writer:
             out_writer.release()
         if visualize:
             cv2.destroyAllWindows()
 
-        landmarks_np = np.array(raw_landmarks)
+        #landmarks_np = np.array(raw_landmarks)
+        landmarks_np = smooth_landmarks
         metadata = {
             'sampling_rate': fps,
             'total_frames': total_frames,
@@ -189,6 +207,7 @@ class HandTracker:
 
         """
         print("Running live hand tracking (ESC to quit)...")
+        frame_idx = 0
         while self.cap.isOpened():
             frame = self.get_image(flip_frame=True)
             if frame is None:
@@ -202,14 +221,20 @@ class HandTracker:
                 ])
 
                 # Compute joint angles
-                angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
-                print(f"shape of angles: {len(angles)}")
-                self.last_angles = angles
+                #angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
+                #print(f"shape of angles: {len(angles)}")
+                #self.last_angles = angles
 
-                if self.verbose:
-                    print(angles)
-                if self.save_angles:
-                    self.joint_log.append([time.time()] + list(angles.values()))
+                #if self.verbose:
+                #    print(angles)
+                #if self.save_angles:
+                #    self.joint_log.append([time.time()] + list(angles.values()))
+
+            # Show frame index on frame
+            cv2.putText(frame, f"Frame: {frame_idx}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            frame_idx += 1
 
             # Display OpenCV image with 2D landmarks
             self._visualize(frame, landmarks)
@@ -348,9 +373,6 @@ class HandTracker:
         """
         Exports the joint angle log to a CSV file.
 
-        Args:
-            None
-
         Returns:
             None
 
@@ -373,11 +395,9 @@ class HandTracker:
         Returns the last detected landmarks. If Kalman filtering was applied, returns the filtered landmarks.
         If no landmarks were detected, returns None.
 
-        Args:
-            None
-
         Returns:
             np.ndarray or None: Filtered landmarks of shape (N, 21, 3) or None if no landmarks were detected.
+
         """
         return self.landmarks_filtered if self.landmarks_filtered is not None else None
 
@@ -385,10 +405,8 @@ class HandTracker:
         """
         Returns the last computed joint angles.
 
-        Args:
-            None
-
         Returns:
             dict or None: Dictionary of joint angles where keys are joint names and values are angles in degrees.
+
         """
         return self.last_angles if self.last_angles is not None else None

@@ -1,6 +1,6 @@
 [project]
 name = "handtrack"
-version = "0.0.3.10"
+version = "0.0.3.1"
 description = "A Python package for tracking hand landmarks in images and videos."
 authors = [
     { name="Jonathan Shulgach", email="jonathan@shulgach.com" }
@@ -11,14 +11,24 @@ requires-python = ">=3.10"
 dependencies = [
     "opencv-python>=4.5.0",
     "mediapipe",
-    "numpy>=1.26.0",
+    "numpy>=1.26.0", # 1.23.5
     "scipy>=1.5.0",
+    "pandas",
     "matplotlib",
     "pyyaml",
     "PyQt5>=5.15",
     "pyqtgraph",
     "PyOpenGL",
     "tqdm",
+    "pandas",
+
+    # For device communication
+    "pyserial",
+
+    # For hand rendering
+    "trimesh",
+    "chumpy",
+    #"scikit-learn",
     #"torchvision",
 ]
 

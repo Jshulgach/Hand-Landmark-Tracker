@@ -2,9 +2,18 @@ import cv2
 import time
 import threading
 import numpy as np
+import sys
+import os
 
-from src.old_utils.tracking import HandTracker
-from examples.Miniarm.miniarm import MiniArmClient
+# Add src directory to path for handtrack import
+try:
+    from handtrack.tracker import HandTracker
+except ModuleNotFoundError:
+    src_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'src')
+    sys.path.insert(0, os.path.abspath(src_path))
+    from handtrack.tracker import HandTracker
+
+from miniarm import MiniArmClient
 
 class VirtualSpacemouse(object):
     """ A class that serves as a velocity controller for a spacemouse using hand tracking as the control mode

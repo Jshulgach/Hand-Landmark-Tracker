@@ -1,174 +1,216 @@
 """
-predict_from_full_dataset.py
+predict_landmarks_full_dataset.py
 
-Overlays both smoothed landmarks (ground truth) and predicted landmarks (from EMG features)
-onto the video frames. Each video frame is mapped to a corresponding EMG feature prediction
-accounting for the EMG sampling rate, step size, and sync offset.
+Visualizes predicted vs ground-truth hand landmarks from EMG features using a trained model.
+Landmarks are overlaid onto video frames and displayed in real-time.
 
 Author: Jonathan Shulgach
 Date: 06/03/25
 """
 
+import os
 import numpy as np
+import pickle
 import cv2
 import torch
-from src.handtrack.ml import EMGRegressor  # Assuming you saved it in your package
-from src.handtrack.processing import Kalman3D
+import logging
+import argparse
+from scipy.interpolate import interp1d
+from handtrack.ml import EMGRegressor
+from handtrack.processing import Kalman3D
+from handtrack.tracker import get_hand_connections
 
-# ---------- CONFIG ----------
-VIDEO_PATH = r"G:\Shared drives\NML_shared\DataShare\HDEMG Human Healthy\Open_Ephys\Jonathan\2025_05_07\media\HandDynamic.mp4"
-LANDMARKS_FILE = '../../data/HandDynamic_smoothed_landmarks.npz'
-EMG_DATA_FILE = '../../data/hand_dynamic_dataset.npz'
-MODEL_PATH = '../../data/emg_regressor.pth'
-SCALER_MEAN_PATH = '../../data/feature_scaler.npy'
-SCALER_STD_PATH = '../../data/feature_scaler_std.npy'
-SYNC_OFFSET_FILE = '../../data/sync_offset.txt'  # File with sync offset value
-
-# ---------- LOAD SYNC OFFSET ----------
-with open(SYNC_OFFSET_FILE, 'r') as f:
-    sync_offset = float(f.readlines()[0].split(': ')[1].strip().split(' ')[0])
-print(f"Loaded sync offset: {sync_offset:.3f} seconds.")
-
-# ---------- LOAD DATA ----------
-print("Loading landmarks...")
-landmarks_data = np.load(LANDMARKS_FILE)
-landmarks = landmarks_data['landmarks']
-lm_fs = int(landmarks_data['sampling_rate'])
-print(f"Loaded landmarks shape: {landmarks.shape} at {lm_fs} Hz.")
-
-print("Loading EMG features...")
-emg_data = np.load(EMG_DATA_FILE)
-emg_features = emg_data['emg_features']
-print(f"Loaded EMG features shape: {emg_features.shape}")
-
-print("Loading model and scaler...")
-mean = np.load(SCALER_MEAN_PATH)
-std = np.load(SCALER_STD_PATH)
-scaler = lambda x: (x - mean) / std
-
-# Load model
-model = EMGRegressor(emg_features.shape[1], landmarks.shape[1] * landmarks.shape[2])
-model.load_state_dict(torch.load(MODEL_PATH))
-model.eval()
-# Initialize Kalman filters for each landmark
-kalman_filters = [Kalman3D() for _ in range(21)]
-
-# ---------- LOAD VIDEO ----------
-cap = cv2.VideoCapture(VIDEO_PATH)
-assert cap.isOpened(), "Failed to open video file."
-
-video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-print(f"Video has {video_frame_count} frames at {video_fps:.2f} fps.")
-
-# ---------- ALIGN EMG FEATURES TO VIDEO FRAMES ----------
-emg_fs = 5000  # EMG sampling rate
-window_ms = 50
-step_ms = 10
-step_size = int(step_ms * emg_fs / 1000)
-emg_time = np.arange(emg_features.shape[0]) * (step_size / emg_fs)# + sync_offset
-
-video_time = np.arange(landmarks.shape[0]) / video_fps + sync_offset # Match video frames to landmarks
-
-# Downsample EMG features to match landmark samples
-frame_to_emg_idx = np.searchsorted(emg_time, video_time, side='right') - 1
-frame_to_emg_idx = np.clip(frame_to_emg_idx, 0, emg_features.shape[0] - 1)
-emg_features_downsampled = emg_features[frame_to_emg_idx]
-print(f"Downsampled EMG features shape: {emg_features_downsampled.shape}")
-
-# Scale EMG features
-X_scaled = scaler(emg_features_downsampled)
-X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
-
-# Predict landmarks
-print("Predicting landmarks from EMG...")
-with torch.no_grad():
-    predicted_landmarks = model(X_tensor).numpy().reshape((-1, 21, 3))
-print(f"Predicted landmarks shape: {predicted_landmarks.shape}")
-
-# Apply Kalman filter frame-by-frame
-smoothed_predictions = []
-for t in range(predicted_landmarks.shape[0]):
-    filtered_frame = []
-    for idx in range(21):
-        filtered_pos = kalman_filters[idx].update(predicted_landmarks[t, idx])
-        filtered_frame.append(filtered_pos)
-    smoothed_predictions.append(filtered_frame)
-
-smoothed_predictions = np.array(smoothed_predictions)  # Shape: (num_frames, 21, 3)
-
-# ---------- HAND CONNECTIONS ----------
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),       # Thumb
-    (0, 5), (5, 6), (6, 7), (7, 8),       # Index
-    (0, 9), (9, 10), (10, 11), (11, 12),  # Middle
-    (0, 13), (13, 14), (14, 15), (15, 16),# Ring
-    (0, 17), (17, 18), (18, 19), (19, 20) # Pinky
-]
-
-# ---------- VISUALIZATION ----------
-total_frames = min(video_frame_count, landmarks.shape[0])
-print(f"Using {total_frames} frames for overlay visualization.")
-
-frame_idx = 0
-print("Starting overlay visualization... Press ESC to exit.")
-while cap.isOpened() and frame_idx < total_frames:
-    ret, frame = cap.read()
-    if not ret:
-        break
-
-    # Ground-truth landmark
-    gt_landmark_frame = landmarks[frame_idx]
-
-    # Predicted landmark
-    pred_landmark_frame = smoothed_predictions[frame_idx]
-
-    # Draw text annotations
-    cv2.putText(frame,"Mediapipe (Ground Truth)", (1000, 30), cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,(139, 0, 0), 2, cv2.LINE_AA)
-
-    # Draw ground-truth landmarks (blue)
-    for lm in gt_landmark_frame:
-        cx = int(lm[0] * frame.shape[1])
-        cy = int(lm[1] * frame.shape[0])
-        cv2.circle(frame, (cx, cy), 4, (255, 0, 0), -1)  # Blue
-
-    # Draw connections for ground-truth (blue)
-    for connection in HAND_CONNECTIONS:
-        idx_start, idx_end = connection
-        x0 = int(gt_landmark_frame[idx_start][0] * frame.shape[1])
-        y0 = int(gt_landmark_frame[idx_start][1] * frame.shape[0])
-        x1 = int(gt_landmark_frame[idx_end][0] * frame.shape[1])
-        y1 = int(gt_landmark_frame[idx_end][1] * frame.shape[0])
-        cv2.line(frame, (x0, y0), (x1, y1), (255, 0, 0), 2)
-
-    cv2.putText(frame,"Prediction from EMG",(1000, 60), cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,(255, 255, 0), 2, cv2.LINE_AA)
-
-    # Draw predicted landmarks (cyan)
-    for lm in pred_landmark_frame:
-        cx = int(lm[0] * frame.shape[1])
-        cy = int(lm[1] * frame.shape[0])
-        cv2.circle(frame, (cx, cy), 4, (255, 255, 0), -1)  # Cyan
-
-    # Draw connections for predicted (cyan)
-    for connection in HAND_CONNECTIONS:
-        idx_start, idx_end = connection
-        x0 = int(pred_landmark_frame[idx_start][0] * frame.shape[1])
-        y0 = int(pred_landmark_frame[idx_start][1] * frame.shape[0])
-        x1 = int(pred_landmark_frame[idx_end][0] * frame.shape[1])
-        y1 = int(pred_landmark_frame[idx_end][1] * frame.shape[0])
-        cv2.line(frame, (x0, y0), (x1, y1), (255, 255, 0), 2)
+# Hand connections (for drawing)
+HAND_CONNECTIONS = get_hand_connections()
 
 
+def parse_events_file(file_path):
+    """Extract Start and End indices from a single event file."""
+    start_idx, end_idx = None, None
+    with open(file_path, 'r') as f:
+        next(f)  # Skip header line
+        for line in f:
+            parts = line.strip().split(',')
+            if len(parts) < 3:
+                continue  # Skip malformed lines
+            sample_index_str, _, label = parts
+            if label == 'Start' and start_idx is None:
+                start_idx = int(sample_index_str)
+            elif label == 'End' and end_idx is None:
+                end_idx = int(sample_index_str)
+            if start_idx is not None and end_idx is not None:
+                break
+    return start_idx, end_idx
 
-    cv2.imshow("Landmark Overlay", frame)
-    if cv2.waitKey(int(1000 / video_fps)) & 0xFF == 27:
-        break
 
-    frame_idx += 1
+def setup_logger():
+    logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 
-cap.release()
-cv2.destroyAllWindows()
 
-print("Visualization complete!")
+def run_visualization(root_dir, label=None):
+    setup_logger()
+
+    if label is None:
+        label = "HandDynamic"
+
+    logging.info(f"Using label: {label}")
+
+    # Define expected filenames in root_dir
+    video_path = os.path.join(root_dir, 'media', f"{label}.mp4")
+    landmarks_file = os.path.join(root_dir, 'landmarks', f"{label}_smoothed_landmarks.npz")
+    emg_file = os.path.join(root_dir, f"{label}_feature_dataset.npz")
+    model_path = os.path.join(root_dir, 'model', f"{label}_emg_regressor.pth")
+    scaler_path = os.path.join(root_dir, 'model', f"{label}_scaler.pkl")
+    sync_offset_file = os.path.join(root_dir, 'events', f"{label}_sync_offset.txt")
+
+    # Sanity check files
+    for f in [video_path, landmarks_file, emg_file, model_path, scaler_path, sync_offset_file]:
+        if not os.path.exists(f):
+            raise FileNotFoundError(f"Missing required file: {f}")
+
+    video_events_file = os.path.join(root_dir, 'events', f"{label}_video_events.txt")
+    if not os.path.exists(video_events_file):
+        raise FileNotFoundError(f"Missing video events file: {video_events_file}")
+    start_frame_index, _ = parse_events_file(video_events_file)
+    logging.info(f"Parsed start frame index from video events: {start_frame_index}")
+
+    # Load sync offset
+    with open(sync_offset_file, 'r') as f:
+        sync_offset = float(f.readline().split(': ')[1].split(' ')[0])
+    logging.info(f"Loaded sync offset: {sync_offset:.3f} seconds.")
+
+    # Load landmark ground truth
+    logging.info("Loading landmarks...")
+    lm_data = np.load(landmarks_file)
+    landmarks = lm_data['landmarks']
+    lm_fs = int(lm_data['sampling_rate'])
+    print(f"Landmarks shape: {landmarks.shape}, Sampling rate: {lm_fs} Hz")
+
+    # Load EMG features
+    logging.info("Loading EMG features...")
+    emg_data = np.load(emg_file)
+    emg_features = emg_data['emg_features']
+    emg_fs = int(emg_data.get('emg_fs', 5000))
+
+    window_ms = int(emg_data.get('window_ms', 50))
+    window_size = int(window_ms * emg_fs / 1000)
+    step_ms = int(emg_data.get('step_ms', 10))
+    step_size = int(step_ms * emg_fs / 1000)
+    logging.info(f"Loaded EMG features: {emg_features.shape} | EMG FS: {emg_fs} Hz")
+
+    # Load scaler
+    logging.info("Loading model and scaler...")
+    print(f" Using scalar path: {scaler_path}")
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
+
+    # Load model
+    model = EMGRegressor(emg_features.shape[1], landmarks.shape[1] * landmarks.shape[2])
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+
+    # Open video
+    cap = cv2.VideoCapture(video_path)
+    assert cap.isOpened(), f"Failed to open video file: {video_path}"
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    #cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_index)
+    logging.info(f"Video has {frame_count} frames at {video_fps:.2f} fps.")
+
+    # Align EMG to video using time offset
+    print(f"Using adjusted offset time: {sync_offset:.3f} seconds")
+
+    # Flatten EMG features for interpolation
+    emg_time = np.arange(emg_features.shape[0]) * (step_size / emg_fs)  # already adjusted by step
+    video_time = np.arange(landmarks.shape[0]) / video_fps - sync_offset  # already sync-adjusted
+    #video_time = np.arange(landmarks.shape[0]) / video_fps
+
+    #adjusting the start index to also include the offset
+    #start_frame_index += int(abs(sync_offset) * video_fps)
+
+    # Interpolate each EMG feature dimension
+    interp_func = interp1d(emg_time, emg_features, axis=0, kind='linear', fill_value='extrapolate')
+    emg_features_interpolated = interp_func(video_time)
+
+    print(f"Interpolated EMG features shape: {emg_features_interpolated.shape}")
+
+    # Predict landmarks
+    logging.info("Predicting landmarks from EMG...")
+    X_scaled = scaler.transform(emg_features_interpolated)
+    X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+
+    with torch.no_grad():
+        predicted_landmarks = model(X_tensor).numpy().reshape((-1, landmarks.shape[1], 3))
+
+    # Kalman filter smoothing
+    kalman_filters = [Kalman3D() for _ in range(21)]
+    smoothed = np.stack([[kf.update(predicted_landmarks[t, j]) for j, kf in enumerate(kalman_filters)] for t in range(predicted_landmarks.shape[0])])
+
+    # Begin overlay visualization
+    total_frames = min(frame_count, landmarks.shape[0])
+    logging.info("Beginning visualization... press ESC to quit.")
+
+    # Create a mask to skip prediction display before the start frame index
+    frame_idx = 0
+    while cap.isOpened() and frame_idx < total_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Ground-truth landmark
+        gt_frame = landmarks[frame_idx]
+
+        # Only draw predictions after the "Start" event
+        if frame_idx >= start_frame_index:
+            pred_frame = smoothed[frame_idx]
+
+            # Draw Predicted landmarks
+            for lm in pred_frame:
+                cx, cy = int(lm[0] * frame.shape[1]), int(lm[1] * frame.shape[0])
+                cv2.circle(frame, (cx, cy), 4, (255, 255, 0), -1)  # Cyan
+
+            for c in HAND_CONNECTIONS:
+                x0, y0 = int(pred_frame[c[0]][0] * frame.shape[1]), int(pred_frame[c[0]][1] * frame.shape[0])
+                x1, y1 = int(pred_frame[c[1]][0] * frame.shape[1]), int(pred_frame[c[1]][1] * frame.shape[0])
+                cv2.line(frame, (x0, y0), (x1, y1), (255, 255, 0), 2)
+
+            cv2.putText(frame, "Prediction from EMG", (1000, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+
+        # Draw GT landmarks
+        for lm in gt_frame:
+            cx, cy = int(lm[0] * frame.shape[1]), int(lm[1] * frame.shape[0])
+            cv2.circle(frame, (cx, cy), 4, (255, 0, 0), -1)  # Blue
+
+        for c in HAND_CONNECTIONS:
+            x0, y0 = int(gt_frame[c[0]][0] * frame.shape[1]), int(gt_frame[c[0]][1] * frame.shape[0])
+            x1, y1 = int(gt_frame[c[1]][0] * frame.shape[1]), int(gt_frame[c[1]][1] * frame.shape[0])
+            cv2.line(frame, (x0, y0), (x1, y1), (255, 0, 0), 2)
+
+        # Add text
+        cv2.putText(frame, "Mediapipe (Ground Truth)", (1000, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (139, 0, 0), 2)
+
+        # Show counter on frame
+        cv2.putText(frame, f"Frame: {frame_idx}/{total_frames}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Show frame
+        cv2.imshow("Landmark Overlay", frame)
+        if cv2.waitKey(int(1000 / video_fps)) & 0xFF == 27:
+            break
+        frame_idx += 1
+
+    cap.release()
+    cv2.destroyAllWindows()
+    logging.info("Visualization complete.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Visualize EMG-predicted landmarks vs. ground truth")
+    parser.add_argument('--root_dir', type=str, required=True,
+                        help='Root directory containing video, model, landmark, and EMG data')
+    parser.add_argument('--label', type=str, default=None,
+                        help="Unique label associated with the video and landmark data")
+    args = parser.parse_args()
+    run_visualization(args.root_dir, args.label)

@@ -98,4 +98,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Old utilities
-/src/old_utils/
+/old_utils/
+
+# Zip archives
+*.zip

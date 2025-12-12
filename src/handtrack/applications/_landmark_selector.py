@@ -149,8 +149,8 @@ class LandmarkSelector:
         Save the trial markers to a text file with sample index and timestamp.
         """
         path = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text Files", "*.txt")],
+            defaultextension=".events",
+            filetypes=[("Event Files", "*.events")],
             title="Save Trial Markers"
         )
         if not path:

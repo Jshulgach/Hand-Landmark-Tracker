@@ -97,6 +97,7 @@ def extract_landmarks(video_path, visualize=False):
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
     raw_landmarks = []
+    landmarks = None
     with tqdm(total=total_frames, desc="Processing frames") as pbar:
         while cap.isOpened():
             success, frame = cap.read()
@@ -130,7 +131,7 @@ def extract_landmarks(video_path, visualize=False):
     metadata = {
         'sampling_rate': fps,
         'total_frames': total_frames,
-        'landmark_labels': [''] * landmarks.shape[1]  # Placeholder for landmark labels
+        #'landmark_labels': [''] * landmarks.shape[1] if landmarks else 1 # Placeholder for landmark labels
     }
 
     return np.array(raw_landmarks), metadata
@@ -148,9 +149,19 @@ def save_landmarks(data, file_path, metadata):
 
 
 if __name__ == "__main__":
-    VIDEO_PATH = r"G:\Shared drives\NML_shared\DataShare\HDEMG_Face\Data\Jack\060525_Pilot\media\WIN_20250605_12_46_53_Silly.mp4"
+    root_path = r"G:/Shared drives/NML_shared/DataShare/HDEMG_Face/Data/Jack/060525_Pilot/raw/"
+    # file_path = os.path.join(root_path, "Angry-20250605_123811.poly5")
+    # file_path = os.path.join(root_path, "Disgust-20250605_124503.poly5")
+    file_path = os.path.join(root_path, "Fear.mp4")
+    # file_path = os.path.join(root_path, "Frown-20250605_123513.poly5")
+    # file_path = os.path.join(root_path, "Grin-20250605_123132.poly5")
+    # file_path = os.path.join(root_path, "Rest-20250605_122936.poly5")
+    # file_path = os.path.join(root_path, "Silly-20250605_124651.poly5")
+    # file_path = os.path.join(root_path, "Surprise-20250605_123641.poly5")
+
     SAVE_VIDEO = False
 
+    VIDEO_PATH = file_path
     print("Extracting landmarks...")
     raw, metadata = extract_landmarks(VIDEO_PATH, visualize=False)
     print(f"Shape of raw landmarks: {raw.shape} (T, 468, 3)")

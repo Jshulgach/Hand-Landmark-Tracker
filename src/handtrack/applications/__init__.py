@@ -1,1 +1,1 @@
-from ._landmark_trial_selector import launch_landmark_selector
+from ._landmark_selector import launch_landmark_selector

@@ -1,5 +1,5 @@
-from ._joint_angles import compute_finger_angles, compute_all_joint_angles, angle_between_points
-from ._kalman_filter import Kalman3D
+from ._joint_angles import compute_3point_finger_angles, compute_all_joint_angles, angle_between_points
+from ._kalman_filter import Kalman3D, KalmanAngle
 from ._filters import notch_filter, bandpass_filter, lowpass_filter, rectify, compute_rms
 from ._features import (
     extract_features,
@@ -11,3 +11,5 @@ from ._features import (
     root_mean_square,
     integrated_emg,
 )
+from ._preprocessing import EMGPreprocessor
+#from ._pipeline import run_pipeline

@@ -27,7 +27,7 @@ from sklearn.metrics import r2_score, mean_absolute_error
 # Configuration Defaults
 # -------------------------------------------
 NUM_EPOCHS = 3000
-EARLY_STOP_PATIENCE = 10
+EARLY_STOP_PATIENCE = 5
 LEARNING_RATE = 1e-3
 VAL_INTERVAL = 20
 
@@ -52,7 +52,7 @@ def train_emg_regressor(root_dir, label):
     logging.info(f"Loaded EMG features: {X.shape}, Landmark labels: {y.shape}")
     if emg_fs and lm_fs:
         logging.info(f"Sampling Rates — EMG: {emg_fs} Hz, Landmarks: {lm_fs} Hz")
-    assert y.shape[1] == 63, f"Expected 63 output dims, got {y.shape[1]}"
+    assert y.shape[1] == 5, f"Expected 5 output dims for finger angles, got {y.shape[1]}"
 
     # Train/test data split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -128,9 +128,12 @@ def train_emg_regressor(root_dir, label):
         logging.info(f"MSE: {test_loss:.4f} | R²: {r2:.4f} | MAE: {mae:.4f}")
 
     # Baseline
-    mean_landmark = np.mean(y_train, axis=0)
-    baseline_mse = np.mean((y_test - mean_landmark) ** 2)
-    baseline_r2 = r2_score(y_test, np.tile(mean_landmark, (y_test.shape[0], 1)))
+    #mean_landmark = np.mean(y_train, axis=0)
+    #baseline_mse = np.mean((y_test - mean_landmark) ** 2)
+    #baseline_r2 = r2_score(y_test, np.tile(mean_landmark, (y_test.shape[0], 1)))
+    mean_angle = np.mean(y_train, axis=0)
+    baseline_mse = np.mean((y_test - mean_angle) ** 2)
+    baseline_r2 = r2_score(y_test, np.tile(mean_angle, (y_test.shape[0], 1)))
     logging.info("=== Baseline Performance ===")
     logging.info(f"MSE: {baseline_mse:.4f} | R²: {baseline_r2:.4f}")
 
@@ -138,6 +141,7 @@ def train_emg_regressor(root_dir, label):
     metadata = {
         "input_dim": int(X.shape[1]),
         "output_dim": int(y.shape[1]),
+        "target_type": "FingerJointAngles",  # <- Add this new key
         "num_epochs": NUM_EPOCHS,
         "emg_fs": emg_fs,
         "lm_fs": lm_fs,

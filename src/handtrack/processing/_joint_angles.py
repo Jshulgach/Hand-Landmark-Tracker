@@ -16,7 +16,10 @@ def angle_between_points(a, b, c, degrees=True):
     cb = c - b
     dot_product = np.dot(ab, cb)
     norm_product = np.linalg.norm(ab) * np.linalg.norm(cb)
-    cosine_angle = np.clip(dot_product / norm_product, -1.0, 1.0)
+    if norm_product == 0:
+        cosine_angle = 1.0  # or some default
+    else:
+        cosine_angle = np.clip(dot_product / norm_product, -1.0, 1.0)
     angle = np.arccos(cosine_angle)
     return np.degrees(angle) if degrees else angle
 
@@ -41,7 +44,7 @@ def compute_all_joint_angles(landmarks):
     return angles
 
 
-def compute_finger_angles(landmarks):
+def compute_3point_finger_angles(landmarks):
     """
     Computes angle for each finger: fingertip -> MCP -> wrist.
 
