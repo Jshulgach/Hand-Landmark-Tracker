@@ -234,6 +234,10 @@ class HandTracker:
             cv2.putText(frame, f"Frame: {frame_idx}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+            # Show quit instructions
+            cv2.putText(frame, "Press ESC to quit", (10, frame.shape[0] - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+
             frame_idx += 1
 
             # Display OpenCV image with 2D landmarks

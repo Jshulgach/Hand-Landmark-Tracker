@@ -1,9 +1,13 @@
 """
-visualize_joint_angles_overlay.py
+test.py
 
+Development script for testing joint angle visualization overlay.
 Overlays predicted vs ground-truth joint angles onto video frames using a trained EMG model.
+
 Author: Jonathan Shulgach
 Date: 06/15/25
+
+Note: This is a development/testing script. For production use, see visualize_predictions.py
 """
 
 import os

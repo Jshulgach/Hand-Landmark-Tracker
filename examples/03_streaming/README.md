@@ -51,17 +51,29 @@ python stream_landmarks_lsl.py --fps 60
 ---
 
 ### 2. `lsl_emg_predict_angles.py`
-Predict joint angles from EMG signals streamed via LSL.
+Predict joint angles from EMG signals streamed via LSL using a trained model.
 
 **Usage:**
 ```bash
-python lsl_emg_predict_angles.py
+# Basic usage with trained model
+python lsl_emg_predict_angles.py --model path/to/model.pkl
+
+# Connect to a specific named EMG stream
+python lsl_emg_predict_angles.py --emg_stream MyEMGStream --model ./model.pkl
+
+# Adjust prediction window size (samples to buffer)
+python lsl_emg_predict_angles.py --model ./model.pkl --window_size 100
 ```
 
 **Requirements:**
-- Trained model file
-- LSL stream of EMG data
-- Model expects specific EMG channel configuration
+- `pip install pylsl joblib`
+- A trained model file (see `examples/Joint_Kinematics_from_EMG/` for training)
+- An active LSL stream of EMG data
+
+**Workflow:**
+1. Train a model using `examples/Joint_Kinematics_from_EMG/`
+2. Start your EMG streaming device
+3. Run this script to get real-time joint angle predictions
 
 ---
 

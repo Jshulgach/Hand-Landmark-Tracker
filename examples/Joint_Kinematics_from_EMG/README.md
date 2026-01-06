@@ -182,7 +182,8 @@ python lsl_emg_predict_angles.py
 | `create_feature_dataset.py` | Build training dataset (features + labels) |
 | `train_model.py` | Train PyTorch regression model |
 | `example_predict_angles.py` | Evaluate model on test set |
-| `lsl_emg_predict_angles.py` | Real-time streaming prediction |
+
+> **Note:** For real-time LSL streaming prediction, see `examples/03_streaming/lsl_emg_predict_angles.py`
 
 ### Utility Scripts
 
@@ -201,13 +202,18 @@ python lsl_emg_predict_angles.py
 | `predict_landmarks_full_dataset.py` | Predict landmarks instead of angles |
 | `example_create_dataset_merged.py` | Merge multiple session datasets |
 
-### Testing/Development
+### Testing/Development (Experimental)
+
+> **Note:** These scripts are for development and testing. They may have hardcoded paths
+> or incomplete implementations. Use main pipeline scripts for production workflows.
 
 | Script | Purpose |
 |--------|---------|
-| `test.py` | Visualization test |
+| `test.py` | Visualization overlay testing |
 | `test_predict_angles_from_video.py` | Test video-based prediction |
-| `TEST_*.py` | Development/debugging scripts |
+| `TEST_*.py` | Development/debugging scripts (may be removed in future versions) |
+| `train_model2.py` | Alternative training implementation |
+| `create_feature_dataset2.py` | Alternative feature extraction with angle computation |
 
 ---
 

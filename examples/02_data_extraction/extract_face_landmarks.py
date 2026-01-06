@@ -1,104 +1,96 @@
-""" 
-A script that extracts the facial landmakrs using the Mediapipe face solution and 
-implements a Klaman filter to smoothen out the positions.
+"""
+Extract facial landmarks from video files using MediaPipe Face Mesh.
+
+Applies optional Kalman filtering to smooth landmark trajectories and saves
+the results to NPZ format for offline analysis.
 
 Author: Jonathan Shulgach
 Date Created: June 10th, 2025
+Updated: January 6th, 2026
 
 """
 
 import os
+import argparse
 import numpy as np
 import cv2
 from tqdm import tqdm
 import mediapipe as mp
+import sys
 
+# Add parent directory to path if handtrack is not installed
+src_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src')
+sys.path.insert(0, os.path.abspath(src_path))
+
+try:
+    from handtrack.processing import Kalman3D
+    from handtrack.io import check_video_path
+except ImportError:
+    # Fallback: inline Kalman3D if handtrack not available
+    class Kalman3D:
+        def __init__(self, dt=1/30, process_noise=1e-3, measurement_noise=1e-2):
+            self.x = np.zeros((6, 1))
+            self.F = np.eye(6)
+            for i in range(3): self.F[i, i+3] = dt
+            self.H = np.hstack((np.eye(3), np.zeros((3, 3))))
+            self.P = np.eye(6)
+            self.Q = np.eye(6) * process_noise
+            self.R = np.eye(3) * measurement_noise
+
+        def update(self, z):
+            z = np.reshape(z, (3, 1))
+            self.x = self.F @ self.x
+            self.P = self.F @ self.P @ self.F.T + self.Q
+            y = z - self.H @ self.x
+            S = self.H @ self.P @ self.H.T + self.R
+            K = self.P @ self.H.T @ np.linalg.inv(S)
+            self.x += K @ y
+            self.P = (np.eye(6) - K @ self.H) @ self.P
+            return self.x[:3].flatten()
+
+    def check_video_path(path):
+        """Simple fallback for video path checking."""
+        if path and os.path.isfile(path):
+            return path
+        return None
+
+# MediaPipe Face Mesh setup
 mp_face_mesh = mp.solutions.face_mesh
 
-
-class Kalman3D:
-    def __init__(self, dt=1/30, process_noise=1e-3, measurement_noise=1e-2):
-        self.x = np.zeros((6, 1))
-        self.F = np.eye(6)
-        for i in range(3): self.F[i, i+3] = dt
-        self.H = np.hstack((np.eye(3), np.zeros((3, 3))))
-        self.P = np.eye(6)
-        self.Q = np.eye(6) * process_noise
-        self.R = np.eye(3) * measurement_noise
-
-    def update(self, z):
-        z = np.reshape(z, (3, 1))
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
-        y = z - self.H @ self.x
-        S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x += K @ y
-        self.P = (np.eye(6) - K @ self.H) @ self.P
-        return self.x[:3].flatten()
-
-
-def apply_kalman_filter(landmarks, video_path=None, visualize=False, save_video=False):
-    filters = [Kalman3D() for _ in range(landmarks.shape[1])]
-    smoothed = []
-
-    cap = None
-    out = None
-    if visualize and video_path:
-        cap = cv2.VideoCapture(video_path)
-        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-        assert cap.isOpened(), "Cannot open video file for visualization"
-
-        if save_video:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out_path = os.path.join(os.path.dirname(video_path), f"{os.path.basename(video_path).split('.')[0]}_labeled.mp4")
-            out = cv2.VideoWriter(out_path, fourcc, video_fps, (frame_width, frame_height))
-
-    with tqdm(total=landmarks.shape[0], desc="Processing frames") as pbar:
-        for idx, frame_landmarks in enumerate(landmarks):
-            filtered_frame = [filters[i].update(frame_landmarks[i]) for i in range(landmarks.shape[1])]
-            smoothed.append(filtered_frame)
-
-            if visualize and cap:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                if visualize:
-                    for i in range(landmarks.shape[1]):
-                        x_filt, y_filt = int(filtered_frame[i][0] * frame.shape[1]), int(filtered_frame[i][1] * frame.shape[0])
-                        cv2.circle(frame, (x_filt, y_filt), 2, (255, 255, 255), -1)
-                    cv2.imshow("Filtered Landmark Tracking", frame)
-
-                if cv2.waitKey(1) & 0xFF == 27:
-                    break
-
-                if save_video:
-                    out.write(frame)
-
-            pbar.update(1)
-
-    if cap:
-        cap.release()
-        if save_video and out:
-            out.release()
-        cv2.destroyAllWindows()
-
-    return np.array(smoothed)
+# Number of face mesh landmarks (without iris refinement)
+NUM_FACE_LANDMARKS = 468
 
 
 def extract_landmarks(video_path, visualize=False):
-    face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1)
+    """
+    Extract raw facial landmarks from a video file.
+
+    Args:
+        video_path (str): Path to the video file.
+        visualize (bool): Whether to display the video with landmarks.
+
+    Returns:
+        raw_landmarks (np.ndarray): Array of shape (N, 468, 3) with landmark positions.
+        metadata (dict): Dictionary with sampling_rate and total_frames.
+    """
+    face_mesh = mp_face_mesh.FaceMesh(
+        static_image_mode=False,
+        max_num_faces=1,
+        refine_landmarks=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
 
     cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Cannot open video file: {video_path}")
+
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
 
     raw_landmarks = []
-    landmarks = None
-    with tqdm(total=total_frames, desc="Processing frames") as pbar:
+
+    with tqdm(total=total_frames, desc="Extracting landmarks") as pbar:
         while cap.isOpened():
             success, frame = cap.read()
             if not success:
@@ -117,59 +109,189 @@ def extract_landmarks(video_path, visualize=False):
                             x = int(lm[0] * frame.shape[1])
                             y = int(lm[1] * frame.shape[0])
                             cv2.circle(frame, (x, y), 1, (0, 255, 0), -1)
-                        cv2.imshow("Landmark Tracking", frame)
 
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
+                        cv2.putText(frame, f"Frame: {len(raw_landmarks)}/{total_frames}", (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        cv2.putText(frame, "Press ESC to quit", (10, frame.shape[0] - 20),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+                        cv2.imshow("Face Landmark Extraction", frame)
+
+                        if cv2.waitKey(1) & 0xFF == 27:
+                            break
+            else:
+                # No face detected - append zeros
+                raw_landmarks.append(np.zeros((NUM_FACE_LANDMARKS, 3)))
 
             pbar.update(1)
 
     face_mesh.close()
     cap.release()
-    cv2.destroyAllWindows()
+    if visualize:
+        cv2.destroyAllWindows()
 
     metadata = {
         'sampling_rate': fps,
         'total_frames': total_frames,
-        #'landmark_labels': [''] * landmarks.shape[1] if landmarks else 1 # Placeholder for landmark labels
+        'num_landmarks': NUM_FACE_LANDMARKS,
     }
 
     return np.array(raw_landmarks), metadata
 
 
-def save_landmarks(data, file_path, metadata):
-    total_frames = len(data)
+def apply_kalman_filter(landmarks, video_path=None, visualize=False, save_video=False):
+    """
+    Apply Kalman filtering to smooth landmark trajectories.
+
+    Args:
+        landmarks (np.ndarray): Raw landmarks of shape (N, 468, 3).
+        video_path (str): Optional path to video for visualization.
+        visualize (bool): Whether to display the smoothed landmarks.
+        save_video (bool): Whether to save a video with smoothed landmarks.
+
+    Returns:
+        smoothed (np.ndarray): Smoothed landmarks of shape (N, 468, 3).
+    """
+    num_landmarks = landmarks.shape[1]
+    filters = [Kalman3D(process_noise=1e-3, measurement_noise=1e-4) for _ in range(num_landmarks)]
+    smoothed = []
+
+    cap = None
+    out = None
+
+    if visualize and video_path:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"Warning: Cannot open video file for visualization: {video_path}")
+            cap = None
+        else:
+            frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            video_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+
+            if save_video:
+                video_name = os.path.splitext(os.path.basename(video_path))[0]
+                out_path = os.path.join(os.path.dirname(video_path), f"{video_name}_face_labeled.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(out_path, fourcc, video_fps, (frame_width, frame_height))
+                print(f"Saving labeled video to: {out_path}")
+
+    with tqdm(total=landmarks.shape[0], desc="Applying Kalman filter") as pbar:
+        for idx, frame_landmarks in enumerate(landmarks):
+            filtered_frame = np.array([filters[i].update(frame_landmarks[i]) for i in range(num_landmarks)])
+            smoothed.append(filtered_frame)
+
+            if cap:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Draw smoothed landmarks
+                for i in range(num_landmarks):
+                    x_filt = int(filtered_frame[i][0] * frame.shape[1])
+                    y_filt = int(filtered_frame[i][1] * frame.shape[0])
+                    cv2.circle(frame, (x_filt, y_filt), 1, (255, 255, 255), -1)
+
+                cv2.putText(frame, f"Frame: {idx + 1}/{landmarks.shape[0]}", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, "Kalman Smoothed", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, "Press ESC to quit", (10, frame.shape[0] - 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+
+                if visualize:
+                    cv2.imshow("Kalman Filtered Landmarks", frame)
+                    if cv2.waitKey(1) & 0xFF == 27:
+                        break
+
+                if out:
+                    out.write(frame)
+
+            pbar.update(1)
+
+    if cap:
+        cap.release()
+    if out:
+        out.release()
+    if visualize:
+        cv2.destroyAllWindows()
+
+    return np.array(smoothed)
+
+
+def save_landmarks(landmarks, file_path, metadata):
+    """
+    Save landmarks to NPZ file.
+
+    Args:
+        landmarks (np.ndarray): Landmark data of shape (N, 468, 3).
+        file_path (str): Output file path.
+        metadata (dict): Metadata dictionary.
+    """
+    total_frames = len(landmarks)
     time_vector = np.arange(total_frames) / metadata['sampling_rate']
+
     np.savez(file_path,
-             landmarks=data,
-             landmark_labels=metadata['landmark_labels'],
+             landmarks=landmarks,
+             num_landmarks=metadata['num_landmarks'],
              sampling_rate=metadata['sampling_rate'],
              time_vector=time_vector)
-    print(f"Saved smoothed landmarks to: {file_path}")
+
+    print(f"Saved landmarks to: {file_path}")
 
 
 if __name__ == "__main__":
-    root_path = r"G:/Shared drives/NML_shared/DataShare/HDEMG_Face/Data/Jack/060525_Pilot/raw/"
-    # file_path = os.path.join(root_path, "Angry-20250605_123811.poly5")
-    # file_path = os.path.join(root_path, "Disgust-20250605_124503.poly5")
-    file_path = os.path.join(root_path, "Fear.mp4")
-    # file_path = os.path.join(root_path, "Frown-20250605_123513.poly5")
-    # file_path = os.path.join(root_path, "Grin-20250605_123132.poly5")
-    # file_path = os.path.join(root_path, "Rest-20250605_122936.poly5")
-    # file_path = os.path.join(root_path, "Silly-20250605_124651.poly5")
-    # file_path = os.path.join(root_path, "Surprise-20250605_123641.poly5")
+    parser = argparse.ArgumentParser(
+        description="Extract facial landmarks from video files with optional Kalman filtering."
+    )
+    parser.add_argument("--video_path", type=str, required=True,
+                        help="Path to the video file containing faces.")
+    parser.add_argument("--output_dir", type=str, default=None,
+                        help="Directory to save landmarks. Defaults to 'landmarks/' next to video.")
+    parser.add_argument("--visualize", action="store_true",
+                        help="Visualize the landmark extraction process.")
+    parser.add_argument("--save_video", action="store_true",
+                        help="Save a video with landmarks overlaid.")
+    parser.add_argument("--no_kalman", action="store_true",
+                        help="Disable Kalman filtering (save raw landmarks only).")
+    args = parser.parse_args()
 
-    SAVE_VIDEO = False
+    # Validate video path
+    video_path = args.video_path.strip()
+    if not os.path.isfile(video_path):
+        print(f"Error: Video file not found: {video_path}")
+        sys.exit(1)
 
-    VIDEO_PATH = file_path
-    print("Extracting landmarks...")
-    raw, metadata = extract_landmarks(VIDEO_PATH, visualize=False)
-    print(f"Shape of raw landmarks: {raw.shape} (T, 468, 3)")
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    video_dir = os.path.dirname(video_path)
 
-    print("Applying Kalman filtering...")
-    smooth = apply_kalman_filter(raw, VIDEO_PATH, visualize=True, save_video=SAVE_VIDEO)
-    print(f"Shape of smoothed landmarks: {smooth.shape} (T, 468, 3)")
+    # Determine output directory
+    if args.output_dir:
+        landmarks_dir = args.output_dir
+    else:
+        landmarks_dir = os.path.normpath(os.path.join(video_dir, '..', 'landmarks'))
+    os.makedirs(landmarks_dir, exist_ok=True)
 
-    # Save example (uncomment if needed)
-    output_path = os.path.join(os.path.dirname(VIDEO_PATH), f"{os.path.basename(VIDEO_PATH).split('.')[0]}_smoothed_landmarks.npz")
-    save_landmarks(smooth, output_path, metadata)
+    # Step 1: Extract raw landmarks
+    print(f"Processing video: {video_path}")
+    raw_landmarks, metadata = extract_landmarks(video_path, visualize=args.visualize)
+    print(f"Extracted {len(raw_landmarks)} frames with {metadata['num_landmarks']} landmarks each")
+
+    # Step 2: Apply Kalman filtering (unless disabled)
+    if args.no_kalman:
+        final_landmarks = raw_landmarks
+        suffix = "_raw_landmarks.npz"
+    else:
+        print("Applying Kalman filtering...")
+        final_landmarks = apply_kalman_filter(
+            raw_landmarks,
+            video_path=video_path,
+            visualize=args.visualize,
+            save_video=args.save_video
+        )
+        suffix = "_landmarks.npz"
+
+    # Step 3: Save landmarks
+    save_path = os.path.join(landmarks_dir, f"{video_name}{suffix}")
+    save_landmarks(final_landmarks, save_path, metadata)
+
+    print("Done!")

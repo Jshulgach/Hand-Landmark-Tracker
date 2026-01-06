@@ -55,3 +55,40 @@ def get_sync_offset(root_dir, label=None, sync_label="Start", emg_fs=5000, video
         print(f"[INFO] Offset saved to {offset_file}")
 
     return offset
+
+
+# Alias for backward compatibility
+calculate_sync_offset = get_sync_offset
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Calculate synchronization offset between EMG and video timestamps."
+    )
+    parser.add_argument("--root_dir", type=str, required=True,
+                        help="Root directory containing events/ folder")
+    parser.add_argument("--label", type=str, default=None,
+                        help="Session label (e.g., 'MySession')")
+    parser.add_argument("--sync_label", type=str, default="Start",
+                        help="Event label to sync on (default: 'Start')")
+    parser.add_argument("--emg_fs", type=int, default=5000,
+                        help="EMG sampling rate in Hz (default: 5000)")
+    parser.add_argument("--video_fps", type=int, default=30,
+                        help="Video frame rate (default: 30)")
+    parser.add_argument("--no_save", action="store_true",
+                        help="Don't save offset to file")
+    
+    args = parser.parse_args()
+    
+    offset = get_sync_offset(
+        root_dir=args.root_dir,
+        label=args.label,
+        sync_label=args.sync_label,
+        emg_fs=args.emg_fs,
+        video_fps=args.video_fps,
+        save_file=not args.no_save
+    )
+    
+    print(f"\nSync offset: {offset:.4f} seconds")

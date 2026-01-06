@@ -17,6 +17,16 @@ python extract_hand_landmarks.py \
     --video_path path/to/video.mp4 \
     --visualize \
     --save_video
+
+# Without Kalman filtering (raw landmarks)
+python extract_hand_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --no_kalman
+
+# Custom output directory
+python extract_hand_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --output_dir ./my_landmarks
 ```
 
 **Output:** `.npz` file containing:
@@ -29,7 +39,7 @@ python extract_hand_landmarks.py \
 - Kalman filtering for smooth trajectories (enabled by default)
 - Progress bar with frame count
 - Optional video output with landmarks overlaid
-- Saves to `landmarks/` directory
+- Saves to `landmarks/` directory by default
 
 ---
 
@@ -38,13 +48,42 @@ Extract facial landmarks using MediaPipe Face Mesh (468 landmarks).
 
 **Usage:**
 ```bash
-python extract_face_landmarks.py
+# Basic extraction
+python extract_face_landmarks.py --video_path path/to/video.mp4
+
+# With visualization
+python extract_face_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --visualize
+
+# Save labeled video
+python extract_face_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --visualize \
+    --save_video
+
+# Without Kalman filtering
+python extract_face_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --no_kalman
+
+# Custom output directory
+python extract_face_landmarks.py \
+    --video_path path/to/video.mp4 \
+    --output_dir ./my_landmarks
 ```
+
+**Output:** `.npz` file containing:
+- `landmarks`: (N, 468, 3) NumPy array of normalized 3D positions
+- `num_landmarks`: Number of landmarks (468)
+- `sampling_rate`: Video FPS
+- `time_vector`: Frame timestamps in seconds
 
 **Features:**
 - Full face mesh (468 landmarks)
 - Eyes, nose, mouth, face contour
 - 3D depth estimation
+- Kalman filtering for smooth trajectories
 
 **Use Case:** Facial expression analysis, gaze tracking, emotion recognition.
 

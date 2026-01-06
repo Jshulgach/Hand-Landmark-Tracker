@@ -205,6 +205,12 @@ def stream_landmarks(source=0, stream_name="HandLandmarks", max_hands=1,
                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 cv2.putText(frame, f"Kalman: {'ON' if apply_kalman else 'OFF'}", (10, 120),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, f"LSL: {stream_name}", (10, 150),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Quit instructions
+                cv2.putText(frame, "Press ESC to quit", (10, frame.shape[0] - 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
                 
                 cv2.imshow("LSL Hand Landmark Streaming", frame)
                 if cv2.waitKey(1) & 0xFF == 27:  # ESC key
