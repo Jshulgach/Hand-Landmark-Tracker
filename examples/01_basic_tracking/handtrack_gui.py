@@ -12,6 +12,8 @@ import sys
 import os
 import csv
 import time
+import socket
+import json
 from datetime import datetime
 
 import cv2
@@ -20,7 +22,7 @@ import mediapipe as mp
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QCheckBox, QLineEdit, QPushButton, QFileDialog, QGroupBox,
-    QRadioButton, QButtonGroup, QSpinBox, QSlider, QFrame
+    QRadioButton, QButtonGroup, QSpinBox, QSlider, QFrame, QScrollArea
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap
@@ -77,6 +79,12 @@ class HandTrackerGUI(QMainWindow):
         self.frame_count = 0
         self.max_hands = 2
 
+        # UDP Broadcasting state
+        self.udp_enabled = False
+        self.udp_ip = "255.255.255.255"  # Broadcast address
+        self.udp_port = 5005
+        self.udp_socket = None
+
         # Initialize Kalman filters for all landmarks (per hand)
         self.kalman_filters = [[Kalman3D(process_noise=1e-3, measurement_noise=1e-4) 
                                 for _ in range(self.NUM_LANDMARKS)] for _ in range(self.max_hands)]
@@ -111,9 +119,13 @@ class HandTrackerGUI(QMainWindow):
         self.video_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.video_label, stretch=3)
 
-        # Control panel (right side)
+        # Control panel (right side) with scroll area
         control_panel = self.create_control_panel()
-        main_layout.addWidget(control_panel, stretch=1)
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(control_panel)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #2d2d2d; }")
+        main_layout.addWidget(scroll_area, stretch=1)
 
     def create_control_panel(self):
         """Create the right-side control panel."""
@@ -234,6 +246,42 @@ class HandTrackerGUI(QMainWindow):
 
         layout.addWidget(processing_group)
 
+        # --- UDP Broadcasting ---
+        udp_group = QGroupBox("UDP Broadcasting")
+        udp_layout = QVBoxLayout(udp_group)
+
+        self.udp_checkbox = QCheckBox("Enable UDP Broadcasting")
+        self.udp_checkbox.toggled.connect(self.on_udp_toggled)
+        udp_layout.addWidget(self.udp_checkbox)
+
+        # UDP IP address
+        ip_layout = QHBoxLayout()
+        ip_layout.addWidget(QLabel("IP Address:"))
+        self.udp_ip_edit = QLineEdit()
+        self.udp_ip_edit.setText(self.udp_ip)
+        self.udp_ip_edit.textChanged.connect(self.on_udp_ip_changed)
+        self.udp_ip_edit.setPlaceholderText("e.g., 255.255.255.255 or 192.168.1.255")
+        ip_layout.addWidget(self.udp_ip_edit)
+        udp_layout.addLayout(ip_layout)
+
+        # UDP Port
+        port_layout = QHBoxLayout()
+        port_layout.addWidget(QLabel("Port:"))
+        self.udp_port_spin = QSpinBox()
+        self.udp_port_spin.setRange(1024, 65535)
+        self.udp_port_spin.setValue(self.udp_port)
+        self.udp_port_spin.valueChanged.connect(self.on_udp_port_changed)
+        port_layout.addWidget(self.udp_port_spin)
+        udp_layout.addWidget(QLabel("(Broadcast port for hand data)"))
+        udp_layout.addLayout(port_layout)
+
+        # UDP status
+        self.udp_status = QLabel("UDP: Disabled")
+        self.udp_status.setStyleSheet("color: #888;")
+        udp_layout.addWidget(self.udp_status)
+
+        layout.addWidget(udp_group)
+
         # --- Data Recording ---
         recording_group = QGroupBox("Data Recording")
         recording_layout = QVBoxLayout(recording_group)
@@ -338,6 +386,22 @@ class HandTrackerGUI(QMainWindow):
         if checked:
             # Reset filters when enabling
             self.reset_kalman_filters()
+
+    def on_udp_toggled(self, checked):
+        """Handle UDP broadcasting toggle."""
+        self.udp_enabled = checked
+        if checked:
+            self.start_udp_broadcast()
+        else:
+            self.stop_udp_broadcast()
+
+    def on_udp_ip_changed(self, text):
+        """Handle UDP IP address change."""
+        self.udp_ip = text
+
+    def on_udp_port_changed(self, value):
+        """Handle UDP port change."""
+        self.udp_port = value
 
     def on_save_dir_changed(self, text):
         """Handle save directory text change."""
@@ -492,6 +556,59 @@ class HandTrackerGUI(QMainWindow):
         self.kalman_filters = [[Kalman3D(process_noise=1e-3, measurement_noise=1e-4) 
                                 for _ in range(self.NUM_LANDMARKS)] for _ in range(self.max_hands)]
 
+    def start_udp_broadcast(self):
+        """Initialize UDP socket for broadcasting."""
+        try:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            self.udp_status.setText("UDP: Active")
+            self.udp_status.setStyleSheet("color: #44ff44;")
+            print(f"UDP broadcast initialized: {self.udp_ip}:{self.udp_port}")
+        except Exception as e:
+            print(f"Error initializing UDP socket: {e}")
+            self.udp_enabled = False
+            self.udp_checkbox.setChecked(False)
+            self.udp_status.setText(f"UDP: Error - {str(e)}")
+            self.udp_status.setStyleSheet("color: #ff4444;")
+
+    def stop_udp_broadcast(self):
+        """Close UDP socket."""
+        if self.udp_socket:
+            try:
+                self.udp_socket.close()
+            except:
+                pass
+            self.udp_socket = None
+        self.udp_status.setText("UDP: Disabled")
+        self.udp_status.setStyleSheet("color: #888;")
+
+    def broadcast_landmarks(self, frame_landmarks, num_hands):
+        """Broadcast hand landmarks via UDP."""
+        if not self.udp_enabled or not self.udp_socket or not frame_landmarks:
+            return
+
+        try:
+            # Convert numpy arrays to lists for JSON serialization
+            data = {
+                "frame": self.frame_count,
+                "num_hands": num_hands,
+                "timestamp": time.time(),
+                "hands": []
+            }
+
+            for hand_idx, landmarks in enumerate(frame_landmarks):
+                hand_data = {
+                    "hand_index": hand_idx,
+                    "landmarks": landmarks.tolist() if isinstance(landmarks, np.ndarray) else landmarks
+                }
+                data["hands"].append(hand_data)
+
+            # Serialize and send
+            message = json.dumps(data).encode('utf-8')
+            self.udp_socket.sendto(message, (self.udp_ip, self.udp_port))
+        except Exception as e:
+            print(f"Error broadcasting landmarks: {e}")
+
     def update_frame(self):
         """Process and display the next frame."""
         if not self.cap or not self.cap.isOpened():
@@ -555,6 +672,10 @@ class HandTrackerGUI(QMainWindow):
         if self.is_recording:
             self.recorded_landmarks.append(frame_landmarks)
 
+        # Broadcast landmarks via UDP if enabled
+        if self.udp_enabled and frame_landmarks:
+            self.broadcast_landmarks(frame_landmarks, num_hands)
+
         # Draw overlay info
         self.frame_count += 1
         cv2.putText(frame, f"Frame: {self.frame_count}", (10, 30),
@@ -596,6 +717,7 @@ class HandTrackerGUI(QMainWindow):
     def closeEvent(self, event):
         """Handle window close."""
         self.stop_tracking()
+        self.stop_udp_broadcast()
         if hasattr(self, 'hands'):
             self.hands.close()
         event.accept()
