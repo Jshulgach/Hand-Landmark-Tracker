@@ -36,7 +36,9 @@ This code uses the amazing features of Google's machine learning suite [MediaPip
    ~~~
 3. Install the required packages.
     ~~~
-    pip install -r requirements.txt
+    pip install opencv-python
+    pip install pyqt5
+    pip install mediapipe==0.10.14 
     ~~~
 
 
