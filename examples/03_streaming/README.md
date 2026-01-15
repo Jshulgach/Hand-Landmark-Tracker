@@ -1,10 +1,49 @@
-# LSL Streaming Examples
+# Streaming Examples
 
-Real-time hand landmark streaming via Lab Streaming Layer (LSL) for integration with other applications.
+Real-time landmark streaming for integration with other applications.
 
-## Examples
+## Quick Start: UDP Broadcasting (Recommended)
 
-### 1. `stream_landmarks_lsl.py` ⭐
+The easiest way to stream landmarks is using the GUI applications with built-in UDP broadcasting:
+
+```bash
+# Hand tracking with UDP streaming
+python ../01_basic_tracking/handtrack_gui.py
+
+# Face tracking with UDP streaming
+python ../01_basic_tracking/facetrack_gui.py
+```
+
+**In the GUI:**
+1. Check "Enable UDP Broadcasting"
+2. Set IP address (use `255.255.255.255` for local broadcast)
+3. Set port (default: 5005)
+4. Start tracking
+
+**Receive Data (Python):**
+```python
+import socket
+import json
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(('', 5005))
+
+while True:
+    data, addr = sock.recvfrom(65535)
+    landmarks = json.loads(data.decode('utf-8'))
+    print(f"Frame: {landmarks['frame']}, Hands: {landmarks.get('num_hands', landmarks.get('num_faces'))}")
+```
+
+**Advantages:**
+- No external dependencies (pure socket)
+- Works across networks
+- Low latency
+- Simple JSON format
+- Cross-platform
+
+---
+
+## LSL Streaming (Advanced)
 Stream hand landmarks to LSL in real-time from webcam.
 
 **Basic Usage:**

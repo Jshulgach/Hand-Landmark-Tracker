@@ -2,6 +2,28 @@
 
 Extract hand and face landmarks from videos and save for offline analysis.
 
+## Quick Start
+
+The easiest way to record landmark data is using the GUI applications:
+
+```bash
+# Hand tracking with recording
+python ../01_basic_tracking/handtrack_gui.py
+
+# Face tracking with recording
+python ../01_basic_tracking/facetrack_gui.py
+```
+
+**In the GUI:**
+1. Set a save directory
+2. Click "Start Recording"
+3. Start tracking
+4. Click "Stop Recording" to save
+
+Landmarks will be saved as both `.csv` and `.npz` files.
+
+---
+
 ## Examples
 
 ### 1. `extract_hand_landmarks.py`

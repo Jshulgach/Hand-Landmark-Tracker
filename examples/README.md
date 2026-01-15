@@ -18,21 +18,60 @@ examples/
 
 ## 📁 01_basic_tracking
 
-**Simple examples to get started with hand tracking**
+**Simple examples to get started with hand and face tracking**
 
-### `handtrack_webcam.py`
+### Hand Tracking
+
+#### `handtrack_webcam.py`
 Basic webcam hand tracking with live visualization.
 ```bash
 python 01_basic_tracking/handtrack_webcam.py
 ```
 
-### `demo_gui.py`
+#### `handtrack_gui.py` ⭐ **Recommended**
+Interactive PyQt5 GUI for hand tracking with Kalman filtering, data recording, and **UDP broadcasting**.
+```bash
+python 01_basic_tracking/handtrack_gui.py
+```
+
+**Features:**
+- Switch between webcam and video file input
+- Kalman filter smoothing
+- Record landmarks (CSV/NPZ format)
+- **Real-time UDP streaming** to other applications
+- Configurable detection parameters
+- Dark theme UI with scrollable controls
+
+### Face Tracking
+
+#### `facetrack_webcam.py`
+Basic webcam face tracking with 468 facial landmarks.
+```bash
+python 01_basic_tracking/facetrack_webcam.py
+```
+
+#### `facetrack_gui.py` ⭐ **Recommended**
+Interactive PyQt5 GUI for face tracking with Kalman filtering, data recording, and **UDP broadcasting**.
+```bash
+python 01_basic_tracking/facetrack_gui.py
+```
+
+**Features:**
+- Switch between webcam and video file input
+- Kalman filter smoothing
+- Record facial landmarks (CSV/NPZ format)
+- **Real-time UDP streaming** to other applications
+- Dark theme UI with scrollable controls
+
+### Marker Tracking
+
+#### `demo_gui.py`
 Interactive GUI for passive circular marker tracking with adjustable parameters.
 ```bash
 python 01_basic_tracking/demo_gui.py
 ```
 
-### `passive_marker_track.py`
+#### `passive_marker_track.py`
 Track passive circular markers in images or video streams.
 ```bash
 python 01_basic_tracking/passive_marker_track.py
@@ -40,8 +79,9 @@ python 01_basic_tracking/passive_marker_track.py
 
 **Use Cases:**
 - Testing camera setup
-- Real-time hand gesture recognition
+- Real-time gesture recognition
 - Quick prototyping
+- Low-cost motion capture with markers
 
 ---
 
