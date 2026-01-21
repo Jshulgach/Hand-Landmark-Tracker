@@ -9,7 +9,7 @@ import os
 
 # Camera IDs - ADD OR REMOVE CAMERAS HERE
 # Example: [0, 1] for 2 cameras, [0, 1, 2] for 3 cameras, etc.
-CAMERA_IDS = [0, 1, 2]  # Modify this list to add/remove cameras
+CAMERA_IDS = [1, 2]  # Modify this list to add/remove cameras
 
 # Number of cameras (automatically calculated)
 NUM_CAMERAS = len(CAMERA_IDS)

@@ -6,6 +6,7 @@ import json
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5010  # Tracker sends here
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow port reuse
 sock.bind((UDP_IP, UDP_PORT))
 sock.settimeout(1.0)
 
@@ -33,15 +34,12 @@ finger_angle_names = {
     "thumb": ["thumb_cmc_mcp", "thumb_ip"]
 }
 
+print(f"FORWARDER: Listening on {UDP_IP}:{UDP_PORT}")
 print(f"FORWARDER: Sending FINGERS ONLY to Unity {UNITY_IP}:{UNITY_PORT}")
-
-# Initialize with 'nan' so Unity ignores indices we don't send
-previous_data = ["nan"] * 78 
+print("Waiting for tracker data...\n")
 
 def map_tracker_to_unity(tracker_angles):
-    global previous_data
-    # Start with a fresh list of nans every frame to ensure we only 
-    # affect what the tracker is currently seeing
+    # Start with a fresh list of nans every frame
     data_list = ["nan"] * 78 
 
     for finger, start_idx in finger_starts.items():
@@ -69,6 +67,8 @@ def map_tracker_to_unity(tracker_angles):
 
 # --- Main Loop ---
 frame_count = 0
+first_packet = True
+
 try:
     while True:
         try:
@@ -77,6 +77,17 @@ try:
                 continue
 
             hand_data = json.loads(data.decode("utf-8"))
+            
+            # Debug: Print first packet to verify format
+            if first_packet:
+                print(f"First packet received from tracker:")
+                print(f"  Frame: {hand_data.get('frame')}")
+                print(f"  Hands detected: {len(hand_data.get('hands', []))}")
+                if hand_data.get("hands"):
+                    print(f"  Angles in first hand: {list(hand_data['hands'][0].get('angles', {}).keys())}")
+                print()
+                first_packet = False
+            
             if hand_data.get("hands") and len(hand_data["hands"]) > 0:
                 # We take the first hand detected
                 first_hand = hand_data["hands"][0]
@@ -86,16 +97,22 @@ try:
                 unity_sock.sendto(unity_message.encode("utf-8"), (UNITY_IP, UNITY_PORT))
 
                 frame_count += 1
-                if frame_count % 10 == 0:
-                    print(f"\rSending Finger Data | Frame: {frame_count}", end="", flush=True)
+                if frame_count % 30 == 0:  # Update every 30 frames for less spam
+                    print(f"\rSending Finger Data | Frame: {frame_count} | Hands: {len(hand_data['hands'])}", end="", flush=True)
 
         except socket.timeout:
             continue
+        except json.JSONDecodeError as e:
+            print(f"\nJSON decode error: {e}")
+            continue
         except Exception as e:
             print(f"\nError: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
 except KeyboardInterrupt:
-    print("\nStopping sender...")
+    print("\n\nStopping forwarder...")
     sock.close()
     unity_sock.close()
+    print("Forwarder stopped cleanly")

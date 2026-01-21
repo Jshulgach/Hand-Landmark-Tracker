@@ -519,6 +519,13 @@ class StereoHandTrackerGUI(QMainWindow):
                     "hand_index": hand_idx,
                     "angles": joint_angles
                 })
+                
+                # Debug output: print index finger angles for first hand (same line update)
+                if hand_idx == 0:
+                    print(f"\rFrame {self.frame_count} [3D Triangulated] - "
+                          f"Index MCP: {joint_angles['index_mcp']:.2f}°, "
+                          f"Index PIP: {joint_angles['index_pip']:.2f}°, "
+                          f"Index DIP: {joint_angles['index_dip']:.2f}°", end='', flush=True)
             
             # Broadcast data
             if self.udp_enabled:
