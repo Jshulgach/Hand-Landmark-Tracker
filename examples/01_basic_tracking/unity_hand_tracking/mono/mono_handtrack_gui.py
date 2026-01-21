@@ -214,6 +214,7 @@ class HandTrackerGUI(QMainWindow):
         # MediaPipe Hands
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=self.max_hands,
+            model_complexity = 1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5
         )
@@ -514,6 +515,7 @@ class HandTrackerGUI(QMainWindow):
         self.hands.close()
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=self.max_hands,
+            model_complexity = 1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5
         )
