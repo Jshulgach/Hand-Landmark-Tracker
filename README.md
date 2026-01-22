@@ -4,7 +4,7 @@
 
 <!-- ![](assets/hand-demo.gif) -->
 
-# Hand Landmark Tracker &nbsp;[![](https://img.shields.io/badge/python-3.8.5-blue.svg)](https://www.python.org/downloads/)
+# Hand Landmark Tracker &nbsp;[![](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
 Hand Landmark Tracker bring a new perspective to human-computer interaction using hands. The hand is the most versatile and intuitive controller someone can use, so it makes sense to see if there is a way to design an interface that takes advantage of the hands without requiring them to touch anything.
 This code uses the amazing features of Google's machine learning suite [MediaPipe](https://developers.google.com/mediapipe), a media-based ML package for classification and recognition with neural networks.
 
@@ -49,10 +49,16 @@ The easiest way to get started is with the interactive GUI applications:
 
 ```bash
 # Hand tracking with GUI
-python examples/01_basic_tracking/unity_hand_tracking/mono/handtrack_gui.py
+cd examples/01_basic_tracking/unity_hand_tracking/mono/
+python mono_handtrack_gui.py
 ```
 ### Stereo Camera Hand Tracking GUI
+```bash
+# all files for stereo tracking can be found below
+cd examples/01_basic_tracking/unity_hand_tracking/stereo/
+```
 #### Configuration
+
 Edit `config.py` to set:
 
 - `CAMERA_IDS`: List of camera indices (e.g., `[1, 2]`)
@@ -61,7 +67,7 @@ Edit `config.py` to set:
 - `UDP_PORT_LANDMARKS`: Port for 3D landmark data (default: 5005)
 - `UDP_PORT_ANGLES`: Port for joint angle data (default: 5010)
 
-![Calibration example](docs/source/_static/calibration_example.jpeg)
+<img src="docs/source/_static/calibration_example.jpeg" alt="Calibration example" width="400">
 
 **Figure:** Example of a checkerboard that could be used.
 
@@ -69,13 +75,13 @@ Edit `config.py` to set:
 
 ##### Step 1: Test Cameras
 ```bash
-python examples/01_basic_tracking/unity_hand_tracking/stereo/test_cameras.py
+python test_cameras.py
 ```
 Verifies all cameras work at specified resolution. Press 'q' to quit, 's' to save test frames.
 
 ##### Step 2: Calibrate Cameras
 ```bash
-python examples/01_basic_tracking/unity_hand_tracking/stereo/calibration.py
+python calibration.py
 ```
 Requirements:
 - Printed checkerboard pattern visible to all cameras
@@ -87,13 +93,13 @@ Output: `calibration_data/multi_camera_calib_latest.npz`
 
 ##### Step 3: Verify Calibration
 ```bash
-python examples/01_basic_tracking/unity_hand_tracking/stereo/verify_calibration.py
+python verify_calibration.py
 ```
 Shows reprojection errors, camera positions, and baseline distances. Good calibration: reprojection error under 0.5 pixels.
 
 #### Running the Tracker
 ```bash
-python examples/01_basic_tracking/unity_hand_tracking/stereo/stereo_handtrack_gui.py
+python stereo_handtrack_gui.py
 ```
 ##### GUI Controls
 
@@ -155,6 +161,10 @@ Frame 123 [3D Triangulated] - Index MCP: 12.34°, Index PIP: 45.67°, Index DIP:
 - Record landmarks to CSV/NPZ files
 - **UDP broadcasting** for real-time streaming to other apps
 - Dark theme UI with intuitive controls
+
+<img src="docs/source/_static/stereo_hand_track.gif" alt="Stereo" width="500">
+
+**Figure:** Example of a stereo hand tracking with unity. 
 
 ### HandTracker Class
 The HandTracker class can be easily imported and used in your own projects:
