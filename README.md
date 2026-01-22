@@ -49,11 +49,7 @@ The easiest way to get started is with the interactive GUI applications:
 
 ```bash
 # Hand tracking with GUI
-python examples/01_basic_tracking/handtrack_gui.py
-
-# Face tracking with GUI
-python examples/01_basic_tracking/facetrack_gui.py
-
+python examples/01_basic_tracking/unity_hand_tracking/mono/handtrack_gui.py
 ```
 ### Stereo Camera Hand Tracking GUI
 #### Configuration
@@ -73,13 +69,13 @@ Edit `config.py` to set:
 
 ##### Step 1: Test Cameras
 ```bash
-python test_cameras.py
+python examples/01_basic_tracking/unity_hand_tracking/stereo/test_cameras.py
 ```
 Verifies all cameras work at specified resolution. Press 'q' to quit, 's' to save test frames.
 
 ##### Step 2: Calibrate Cameras
 ```bash
-python multi_camera_calibration.py
+python examples/01_basic_tracking/unity_hand_tracking/stereo/calibration.py
 ```
 Requirements:
 - Printed checkerboard pattern visible to all cameras
@@ -91,13 +87,13 @@ Output: `calibration_data/multi_camera_calib_latest.npz`
 
 ##### Step 3: Verify Calibration
 ```bash
-python verify_calibration.py
+python examples/01_basic_tracking/unity_hand_tracking/stereo/verify_calibration.py
 ```
 Shows reprojection errors, camera positions, and baseline distances. Good calibration: reprojection error under 0.5 pixels.
 
 #### Running the Tracker
 ```bash
-python stereo_handtrack_gui.py
+python examples/01_basic_tracking/unity_hand_tracking/stereo/stereo_handtrack_gui.py
 ```
 ##### GUI Controls
 
