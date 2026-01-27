@@ -151,6 +151,9 @@ class StereoHandTrackerGUI(QMainWindow):
         self.udp_port_angles = UDP_PORT_ANGLES
         self.udp_socket = None
 
+        # Recording state
+        self.is_recording = False
+
         # Initialize Kalman filters for landmarks (per hand)
         self.kalman_filters = [
             [Kalman3D(process_noise=KALMAN_3D_PROCESS_NOISE, 
@@ -293,6 +296,21 @@ class StereoHandTrackerGUI(QMainWindow):
 
         layout.addWidget(udp_group)
 
+        # Data Recording Control
+        recording_group = QGroupBox("Data Recording")
+        recording_layout = QVBoxLayout(recording_group)
+
+        self.record_checkbox = QCheckBox("Enable Recording")
+        self.record_checkbox.setEnabled(False)  # Disabled until tracking starts
+        self.record_checkbox.toggled.connect(self.on_recording_toggled)
+        recording_layout.addWidget(self.record_checkbox)
+
+        self.record_status = QLabel("Recording: Disabled")
+        self.record_status.setStyleSheet("color: #888;")
+        recording_layout.addWidget(self.record_status)
+
+        layout.addWidget(recording_group)
+
         # Tracking Control
         control_group = QGroupBox("Tracking Control")
         control_layout = QVBoxLayout(control_group)
@@ -342,6 +360,16 @@ class StereoHandTrackerGUI(QMainWindow):
             self.start_udp_broadcast()
         else:
             self.stop_udp_broadcast()
+
+    def on_recording_toggled(self, checked):
+        """Handle recording toggle."""
+        self.is_recording = checked
+        if checked:
+            self.record_status.setText("Recording: Active")
+            self.record_status.setStyleSheet("color: #ff4444;")
+        else:
+            self.record_status.setText("Recording: Disabled")
+            self.record_status.setStyleSheet("color: #888;")
 
     def reset_kalman_filters(self):
         """Reset all Kalman filters."""
@@ -417,6 +445,7 @@ class StereoHandTrackerGUI(QMainWindow):
         payload = {
             "frame": self.frame_count,
             "timestamp": time.time(),
+            "recording" : self.is_recording,
             "hands": hand_angles
         }
 
@@ -454,6 +483,9 @@ class StereoHandTrackerGUI(QMainWindow):
             self.status_label.setText("Status: Running")
             self.status_label.setStyleSheet("color: #44ff44;")
 
+            # Enable recording checkbox when tracking starts
+            self.record_checkbox.setEnabled(True)
+
             # Start timer (30 FPS)
             self.timer.start(33)
             
@@ -475,6 +507,13 @@ class StereoHandTrackerGUI(QMainWindow):
         self.start_btn.setStyleSheet("")
         self.status_label.setText("Status: Stopped")
         self.status_label.setStyleSheet("color: #ffffff;")
+
+        # Disable recording and checkbox when tracking stops
+        self.is_recording = False
+        self.record_checkbox.setChecked(False)
+        self.record_checkbox.setEnabled(False)
+        self.record_status.setText("Recording: Disabled")
+        self.record_status.setStyleSheet("color: #888;")
 
     def update_frame(self):
         """Process and display frames from all cameras."""

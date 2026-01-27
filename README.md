@@ -49,13 +49,13 @@ The easiest way to get started is with the interactive GUI applications:
 
 ```bash
 # Hand tracking with GUI
-cd examples/01_basic_tracking/unity_hand_tracking/mono/
+cd src/unity_hand_tracking/mono/
 python mono_handtrack_gui.py
 ```
 ### Stereo Camera Hand Tracking GUI
 ```bash
 # all files for stereo tracking can be found below
-cd examples/01_basic_tracking/unity_hand_tracking/stereo/
+cd src/unity_hand_tracking/stereo/
 ```
 #### Configuration
 
@@ -165,14 +165,6 @@ Frame 123 [3D Triangulated] - Index MCP: 12.34°, Index PIP: 45.67°, Index DIP:
 <img src="docs/source/_static/stereo_hand_track.gif" alt="Stereo" width="500">
 
 **Figure:** Example of a stereo hand tracking with unity. 
-
-### HandTracker Class
-The HandTracker class can be easily imported and used in your own projects:
-```python
-from handtrack.tracker import HandTracker
-tracker = HandTracker(visualize=True)  # Enable visualization
-tracker.run()
-```
 
 ## Acknowledgement
 
