@@ -230,7 +230,7 @@ class StereoHandTrackerGUI(QMainWindow):
             
             video_layout.addWidget(label, idx, 0)
         
-        main_layout.addWidget(video_widget, stretch=1)
+        main_layout.addWidget(video_widget, stretch=2)
         
         # 3D Visualization Widget (hidden by default)
         # 3D Visualization Widget (hidden by default)
@@ -310,6 +310,7 @@ class StereoHandTrackerGUI(QMainWindow):
         processing_layout = QVBoxLayout(processing_group)
 
         self.kalman_checkbox = QCheckBox("Enable Kalman Filter Smoothing")
+        self.kalman_checkbox.setChecked(True)
         self.kalman_checkbox.toggled.connect(self.on_kalman_toggled)
         processing_layout.addWidget(self.kalman_checkbox)
 
