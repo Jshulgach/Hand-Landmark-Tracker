@@ -7,7 +7,7 @@ import numpy as np
 import mediapipe as mp
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from queue import Queue
 import threading
 
@@ -41,7 +41,9 @@ class MultiCameraTracker:
         # Parallel processing settings
         self.enable_parallel = enable_parallel
         self.num_workers = num_workers
-        self.executor = ThreadPoolExecutor(max_workers=num_workers) if enable_parallel else None
+        # Use more efficient thread pool sizing (2 per camera min)
+        optimal_workers = max(num_cameras, min(num_workers, num_cameras * 2))
+        self.executor = ThreadPoolExecutor(max_workers=optimal_workers) if enable_parallel else None
         
         # Camera captures
         self.captures = []
@@ -165,19 +167,21 @@ class MultiCameraTracker:
         
         if self.enable_parallel and self.executor:
             # Submit all capture tasks
-            futures = []
+            future_to_idx = {}
             for cam_idx in range(self.num_cameras):
                 future = self.executor.submit(self._capture_single_camera, cam_idx)
-                futures.append(future)
+                future_to_idx[future] = cam_idx
             
-            # Collect results
+            # Collect results AS THEY COMPLETE (not in submission order!)
             frames = [None] * self.num_cameras
-            for future in futures:
+            for future in as_completed(future_to_idx.keys(), timeout=0.15):
                 try:
-                    cam_idx, frame = future.result(timeout=0.1)
+                    cam_idx, frame = future.result()
                     frames[cam_idx] = frame
                 except Exception as e:
-                    print(f"Capture timeout/error: {e}")
+                    cam_idx = future_to_idx[future]
+                    print(f"Capture failed for camera {self.camera_ids[cam_idx]}: {e}")
+                    frames[cam_idx] = None
             
             capture_time = time.time() - t0
             self.capture_times.append(capture_time)
@@ -217,19 +221,21 @@ class MultiCameraTracker:
         
         if self.enable_parallel and self.executor:
             # Submit all detection tasks
-            futures = []
+            future_to_idx = {}
             for cam_idx, frame in enumerate(frames):
                 future = self.executor.submit(self._detect_single_camera, cam_idx, frame)
-                futures.append(future)
+                future_to_idx[future] = cam_idx
             
-            # Collect results
+            # Collect results AS THEY COMPLETE (not in submission order!)
             all_results = [None] * self.num_cameras
-            for future in futures:
+            for future in as_completed(future_to_idx.keys(), timeout=0.15):
                 try:
-                    cam_idx, results = future.result(timeout=0.2)
+                    cam_idx, results = future.result()
                     all_results[cam_idx] = results
                 except Exception as e:
-                    print(f"Detection timeout/error: {e}")
+                    cam_idx = future_to_idx[future]
+                    print(f"Detection failed for camera {self.camera_ids[cam_idx]}: {e}")
+                    all_results[cam_idx] = None
             
             detection_time = time.time() - t0
             self.detection_times.append(detection_time)
