@@ -42,7 +42,7 @@ class MultiCameraTracker:
         self.enable_parallel = enable_parallel
         self.num_workers = num_workers
         # Use more efficient thread pool sizing (2 per camera min)
-        optimal_workers = max(num_cameras, min(num_workers, num_cameras * 2))
+        optimal_workers = max(self.num_cameras, min(num_workers, self.num_cameras * 2))
         self.executor = ThreadPoolExecutor(max_workers=optimal_workers) if enable_parallel else None
         
         # Camera captures
