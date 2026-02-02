@@ -22,4 +22,9 @@ submodules = [
     #'rhx_interface',
     #'samples',
     # 'stream',
+    'calibration',
 ]
+
+from .tracker.stereo import MultiCameraTracker
+from .calibration import MultiCameraCalibrator
+from .io.broadcast import UDPBroadcaster, LSLBroadcaster

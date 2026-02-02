@@ -57,6 +57,11 @@ except ImportError:
             self.P = (np.eye(6) - K @ self.H) @ self.P
             return self.x[:3].flatten()
 
+try:
+    from handtrack.io.broadcast import LSLBroadcaster
+except ImportError:
+    LSLBroadcaster = None
+
 
 class Kalman1D:
     """1D Kalman filter for angle smoothing."""
@@ -188,6 +193,8 @@ class HandTrackerGUI(QMainWindow):
         self.udp_ip = "127.0.0.1"  # Broadcast address
         self.udp_port = 5005
         self.udp_socket = None
+        self._last_angle_log = 0.0
+        self.lsl_broadcaster = None
 
         # Initialize Kalman filters for all landmarks (per hand)
         self.kalman_filters = [[Kalman3D(process_noise=1e-3, measurement_noise=1e-4) 
@@ -227,21 +234,38 @@ class HandTrackerGUI(QMainWindow):
         Broadcast joint angles on port 5010
         hand_angles: list of dicts (one per hand)
         """
-        if not self.udp_enabled or not self.udp_socket:
+        if not hand_angles:
             return
 
-        payload = {
-            "frame": self.frame_count,
-            "timestamp": time.time(),
-            "hands": hand_angles
-        }
+        timestamp = time.time()
 
-        try:
-            msg = json.dumps(payload).encode("utf-8")
-            # Use port 5010 for joint angles
-            self.udp_socket.sendto(msg, (self.udp_ip, 5010))
-        except Exception as e:
-            print(f"Joint angle UDP error: {e}")
+        if self.udp_enabled and self.udp_socket:
+            payload = {
+                "frame": self.frame_count,
+                "timestamp": timestamp,
+                "hands": hand_angles
+            }
+            try:
+                msg = json.dumps(payload).encode("utf-8")
+                self.udp_socket.sendto(msg, (self.udp_ip, 5010))
+            except Exception as e:
+                print(f"Joint angle UDP error: {e}")
+
+        if self.lsl_broadcaster:
+            try:
+                self.lsl_broadcaster.send_angles(self.frame_count, timestamp, hand_angles)
+            except Exception as e:
+                print(f"Joint angle LSL error: {e}")
+
+    def _sanitize_angles(self, angles_dict):
+        clean = {}
+        nan_count = 0
+        for k, v in angles_dict.items():
+            if not np.isfinite(v):
+                nan_count += 1
+                v = 0.0
+            clean[k] = float(v)
+        return clean, nan_count
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -420,6 +444,10 @@ class HandTrackerGUI(QMainWindow):
         self.udp_status = QLabel("UDP: Disabled")
         self.udp_status.setStyleSheet("color: #888;")
         udp_layout.addWidget(self.udp_status)
+
+        self.lsl_status = QLabel("LSL: Idle")
+        self.lsl_status.setStyleSheet("color: #888;")
+        udp_layout.addWidget(self.lsl_status)
 
         layout.addWidget(udp_group)
 
@@ -664,6 +692,20 @@ class HandTrackerGUI(QMainWindow):
         self.frame_count = 0
         self.reset_kalman_filters()
 
+        if self.lsl_broadcaster is None:
+            if LSLBroadcaster is None:
+                self.lsl_status.setText("LSL: Unavailable")
+                self.lsl_status.setStyleSheet("color: #ff6666;")
+            else:
+                try:
+                    self.lsl_broadcaster = LSLBroadcaster(stream_name="MonoHandTracker")
+                    self.lsl_status.setText("LSL: Active")
+                    self.lsl_status.setStyleSheet("color: #44ff44;")
+                except Exception as exc:
+                    self.lsl_broadcaster = None
+                    self.lsl_status.setText(f"LSL: Error - {exc}")
+                    self.lsl_status.setStyleSheet("color: #ff4444;")
+
         # Update UI
         self.is_running = True
         self.start_btn.setText("Stop Tracking")
@@ -685,6 +727,11 @@ class HandTrackerGUI(QMainWindow):
         # Stop recording if active
         if self.is_recording:
             self.stop_recording()
+
+        self.lsl_broadcaster = None
+        if hasattr(self, "lsl_status"):
+            self.lsl_status.setText("LSL: Idle")
+            self.lsl_status.setStyleSheet("color: #888;")
 
         # Update UI
         self.is_running = False
@@ -731,8 +778,15 @@ class HandTrackerGUI(QMainWindow):
 
     def broadcast_landmarks(self, frame_landmarks, num_hands):
         """Broadcast hand landmarks via UDP on port 5005."""
-        if not self.udp_enabled or not self.udp_socket or not frame_landmarks:
+        if not frame_landmarks:
             return
+
+        hands_data = []
+        for hand_idx, landmarks in enumerate(frame_landmarks):
+            hands_data.append({
+                "hand_index": hand_idx,
+                "landmarks": landmarks.tolist() if isinstance(landmarks, np.ndarray) else landmarks
+            })
 
         try:
             # Convert numpy arrays to lists for JSON serialization
@@ -740,21 +794,20 @@ class HandTrackerGUI(QMainWindow):
                 "frame": self.frame_count,
                 "num_hands": num_hands,
                 "timestamp": time.time(),
-                "hands": []
+                "hands": hands_data
             }
 
-            for hand_idx, landmarks in enumerate(frame_landmarks):
-                hand_data = {
-                    "hand_index": hand_idx,
-                    "landmarks": landmarks.tolist() if isinstance(landmarks, np.ndarray) else landmarks
-                }
-                data["hands"].append(hand_data)
-
-            # Serialize and send
-            message = json.dumps(data).encode('utf-8')
-            self.udp_socket.sendto(message, (self.udp_ip, self.udp_port))
+            if self.udp_enabled and self.udp_socket:
+                message = json.dumps(data).encode('utf-8')
+                self.udp_socket.sendto(message, (self.udp_ip, self.udp_port))
         except Exception as e:
             print(f"Error broadcasting landmarks: {e}")
+
+        if self.lsl_broadcaster:
+            try:
+                self.lsl_broadcaster.send_landmarks(self.frame_count, time.time(), hands_data)
+            except Exception as e:
+                print(f"Landmark LSL error: {e}")
 
     def update_frame(self):
         """Process and display the next frame."""
@@ -811,11 +864,14 @@ class HandTrackerGUI(QMainWindow):
                         filtered_angles[angle_name] = self.angle_kalman_filters[hand_idx][angle_name].update(angle_value)
                     joint_angles = filtered_angles
 
-                # Debug output: print index finger angles for first hand
-                if hand_idx == 0:
-                    print(f"Frame {self.frame_count} - Index MCP: {joint_angles['index_mcp']:.2f}°, "
-                          f"Index PIP: {joint_angles['index_pip']:.2f}°, "
-                          f"Index DIP: {joint_angles['index_dip']:.2f}°")
+                joint_angles, nan_count = self._sanitize_angles(joint_angles)
+                now = time.time()
+                if hand_idx == 0 and now - self._last_angle_log > 2.0:
+                    self._last_angle_log = now
+                    print(
+                        f"[Angles] nan={nan_count} sample={{'index_mcp': {joint_angles['index_mcp']:.2f}, "
+                        f"'index_pip': {joint_angles['index_pip']:.2f}, 'index_dip': {joint_angles['index_dip']:.2f}}}"
+                    )
 
                 hand_angle_packets.append({
                     "hand_index": hand_idx,
@@ -841,12 +897,12 @@ class HandTrackerGUI(QMainWindow):
         if self.is_recording:
             self.recorded_landmarks.append(frame_landmarks)
 
-        # Broadcast joint angles on port 5010 if UDP enabled
-        if self.udp_enabled and hand_angle_packets:
+        # Broadcast joint angles via UDP/LSL if available
+        if hand_angle_packets and (self.udp_enabled or self.lsl_broadcaster):
             self.broadcast_joint_angles(hand_angle_packets)
 
-        # Broadcast landmarks via UDP on port 5005 if enabled
-        if self.udp_enabled and frame_landmarks:
+        # Broadcast landmarks via UDP/LSL if available
+        if frame_landmarks and (self.udp_enabled or self.lsl_broadcaster):
             self.broadcast_landmarks(frame_landmarks, num_hands)
 
         # Draw overlay info

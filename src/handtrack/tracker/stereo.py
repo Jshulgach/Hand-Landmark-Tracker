@@ -1,26 +1,36 @@
 """
-Multi-camera hand tracking with 3D triangulation.
-Handles camera capture, hand detection, matching, and triangulation.
+Stereo (Multi-Camera) Tracker module.
 """
 
 import cv2
 import numpy as np
 import mediapipe as mp
-from config import (
-    CAMERA_IDS, NUM_CAMERAS, CAMERA_WIDTH, CAMERA_HEIGHT,
-    CALIBRATION_FILE, NUM_LANDMARKS, MAX_HANDS,
-    MIN_CAMERAS_FOR_TRIANGULATION, HAND_MATCH_THRESHOLD,
-    WORLD_COORDINATE_SYSTEM, TRIANGULATION_METHOD
-)
-
+import os
 
 class MultiCameraTracker:
     """Tracks hands across multiple calibrated cameras."""
     
-    def __init__(self):
-        self.num_cameras = NUM_CAMERAS
-        self.camera_ids = CAMERA_IDS
-        self.num_landmarks = NUM_LANDMARKS
+    def __init__(self, 
+                 camera_ids, 
+                 calibration_file,
+                 width=640,
+                 height=480,
+                 num_landmarks=21,
+                 max_hands=2,
+                 triangulation_method='simple_average',
+                 min_cameras=2,
+                 match_threshold=0.1):
+        
+        self.camera_ids = camera_ids
+        self.num_cameras = len(camera_ids)
+        self.calibration_file = calibration_file
+        self.width = width
+        self.height = height
+        self.num_landmarks = num_landmarks
+        self.max_hands = max_hands
+        self.triangulation_method = triangulation_method
+        self.min_cameras = min_cameras
+        self.match_threshold = match_threshold
         
         # Camera captures
         self.captures = []
@@ -42,8 +52,11 @@ class MultiCameraTracker:
         
     def load_calibration(self):
         """Load camera calibration data."""
+        if not os.path.exists(self.calibration_file):
+            raise FileNotFoundError(f"Calibration file not found: {self.calibration_file}")
+
         try:
-            calib_data = np.load(CALIBRATION_FILE, allow_pickle=True)
+            calib_data = np.load(self.calibration_file, allow_pickle=True)
             
             for idx in range(self.num_cameras):
                 self.camera_matrices.append(calib_data[f'camera_matrix_{idx}'])
@@ -80,13 +93,37 @@ class MultiCameraTracker:
                 print(f"Failed to open camera {cam_id}")
                 return False
             
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            
+            # Check actual resolution
+            actual_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            actual_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            
+            if actual_width == 0 or actual_height == 0:
+                print(f" Camera {cam_id} reported 0x0 resolution. Retrying without MJPG force...", end=" ")
+                cap.release()
+                
+                # Re-initialize
+                if os.name == 'nt':
+                    cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
+                else:
+                    cap = cv2.VideoCapture(cam_id)
+                
+                if not cap.isOpened():
+                    print("FAILED ")
+                    return False
+                
+                # Set properties again
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                print("OK")
+
             self.captures.append(cap)
             
             # Create MediaPipe Hands detector
             hands = mp.solutions.hands.Hands(
-                max_num_hands=MAX_HANDS,
+                max_num_hands=self.max_hands,
                 model_complexity=1,
                 min_detection_confidence=0.7,
                 min_tracking_confidence=0.5
@@ -96,16 +133,77 @@ class MultiCameraTracker:
             print(f" Camera {cam_id} initialized")
         
         return True
+
+    def reconnect_camera(self, cam_idx):
+        """Attempt to reconnect a failed camera."""
+        cam_id = self.camera_ids[cam_idx]
+        print(f"Attempting to reconnect Camera {cam_id}...", end=" ")
+        
+        # Release old capture
+        if self.captures[cam_idx] is not None:
+            self.captures[cam_idx].release()
+        
+         # Re-initialize
+        if os.name == 'nt':
+            cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(cam_id)
+        
+        if not cap.isOpened():
+            print("FAILED")
+            self.captures[cam_idx] = None
+            return False
+            
+        # Set properties
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        
+        # Check resolution
+        w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        
+        if w == 0 or h == 0:
+            print("Retry (0x0)...", end=" ")
+            cap.release()
+            
+            # Retry without specific backend
+            cap = cv2.VideoCapture(cam_id)
+            if not cap.isOpened():
+                 print("FAILED")
+                 self.captures[cam_idx] = None
+                 return False
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        
+        self.captures[cam_idx] = cap
+        print("SUCCESS")
+        return True
     
     def capture_frames(self):
         """Capture frames from all cameras."""
         frames = []
-        for cap in self.captures:
-            ret, frame = cap.read()
-            if ret:
-                frames.append(frame)
-            else:
-                frames.append(None)
+        for i, cap in enumerate(self.captures):
+            frame = None
+            if cap is not None and cap.isOpened():
+                try:
+                    ret, frame = cap.read()
+                    if not ret or frame is None or frame.size == 0:
+                        print(f"Warning: Failed to read from camera {self.camera_ids[i]}")
+                        frame = None
+                except Exception as e:
+                    print(f"Error reading from camera {self.camera_ids[i]}: {e}")
+                    frame = None
+            
+            # Auto-reconnection attempt logic
+            if frame is None:
+                if self.reconnect_camera(i):
+                    try:
+                        ret, frame = self.captures[i].read()
+                        if not ret: frame = None
+                    except:
+                        frame = None
+            
+            frames.append(frame)
         return frames
     
     def detect_hands_all_cameras(self, frames):
@@ -147,8 +245,7 @@ class MultiCameraTracker:
                 landmarks_norm = np.array([[lm.x, lm.y] for lm in hand_landmarks.landmark])
                 
                 # Convert to pixel coordinates
-                h, w = CAMERA_HEIGHT, CAMERA_WIDTH
-                landmarks_px = landmarks_norm * [w, h]
+                landmarks_px = landmarks_norm * [self.width, self.height]
                 
                 # Undistort points
                 landmarks_px = landmarks_px.reshape(-1, 1, 2)
@@ -171,20 +268,15 @@ class MultiCameraTracker:
         Match hands across cameras using position similarity.
         Returns: list of matched hand groups, each group is dict {cam_idx: hand_idx}
         """
-        # Simple greedy matching based on centroid distance
-        # For each hand in camera 0, find closest hand in other cameras
-        
         if not all_landmarks_2d[0]:
             return []
         
         matched_groups = []
         
-        # For each hand in camera 0 (reference camera)
         for hand_idx_0, landmarks_0 in enumerate(all_landmarks_2d[0]):
             group = {0: hand_idx_0}
             centroid_0 = np.mean(landmarks_0, axis=0)
             
-            # Find matching hands in other cameras
             for cam_idx in range(1, self.num_cameras):
                 if not all_landmarks_2d[cam_idx]:
                     continue
@@ -194,19 +286,16 @@ class MultiCameraTracker:
                 
                 for hand_idx, landmarks in enumerate(all_landmarks_2d[cam_idx]):
                     centroid = np.mean(landmarks, axis=0)
+                    dist = np.linalg.norm(centroid - centroid_0) / self.width
                     
-                    # Normalize distance by image size
-                    dist = np.linalg.norm(centroid - centroid_0) / CAMERA_WIDTH
-                    
-                    if dist < best_distance and dist < HAND_MATCH_THRESHOLD:
+                    if dist < best_distance and dist < self.match_threshold:
                         best_distance = dist
                         best_match_idx = hand_idx
                 
                 if best_match_idx is not None:
                     group[cam_idx] = best_match_idx
             
-            # Only keep groups visible in at least MIN_CAMERAS_FOR_TRIANGULATION cameras
-            if len(group) >= MIN_CAMERAS_FOR_TRIANGULATION:
+            if len(group) >= self.min_cameras:
                 matched_groups.append(group)
         
         return matched_groups
@@ -214,18 +303,13 @@ class MultiCameraTracker:
     def triangulate_landmark(self, landmark_points_2d, camera_indices):
         """
         Triangulate a single landmark from multiple views.
-        landmark_points_2d: list of 2D points (one per camera)
-        camera_indices: list of camera indices corresponding to the points
-        Returns: 3D point in world coordinates
         """
         if len(landmark_points_2d) < 2:
             return None
         
-        # Use cv2.triangulatePoints for pairs, then average
-        if TRIANGULATION_METHOD == 'simple_average':
+        if self.triangulation_method == 'simple_average':
             triangulated_points = []
             
-            # Triangulate using camera 0 as reference with each other camera
             ref_idx = camera_indices[0]
             ref_point = landmark_points_2d[0].reshape(2, 1)
             
@@ -233,7 +317,6 @@ class MultiCameraTracker:
                 other_idx = camera_indices[i]
                 other_point = landmark_points_2d[i].reshape(2, 1)
                 
-                # Triangulate
                 point_4d = cv2.triangulatePoints(
                     self.projection_matrices[ref_idx],
                     self.projection_matrices[other_idx],
@@ -241,16 +324,13 @@ class MultiCameraTracker:
                     other_point
                 )
                 
-                # Convert from homogeneous to 3D
                 point_3d = point_4d[:3] / point_4d[3]
                 triangulated_points.append(point_3d.flatten())
             
-            # Average all triangulated points
             avg_point = np.mean(triangulated_points, axis=0)
             return avg_point
         
         else:
-            # Default: use first pair only
             point_4d = cv2.triangulatePoints(
                 self.projection_matrices[camera_indices[0]],
                 self.projection_matrices[camera_indices[1]],
@@ -263,14 +343,10 @@ class MultiCameraTracker:
     def triangulate_hand(self, all_landmarks_2d, matched_group):
         """
         Triangulate all landmarks for a matched hand.
-        Returns: (21, 3) array of 3D landmarks
         """
         landmarks_3d = []
-        
-        # Get camera indices and corresponding landmarks
         cam_indices = list(matched_group.keys())
         
-        # For each landmark point
         for lm_idx in range(self.num_landmarks):
             points_2d = []
             valid_cam_indices = []
@@ -281,13 +357,11 @@ class MultiCameraTracker:
                 points_2d.append(landmark_2d)
                 valid_cam_indices.append(cam_idx)
             
-            # Triangulate this landmark
             point_3d = self.triangulate_landmark(points_2d, valid_cam_indices)
             
             if point_3d is not None:
                 landmarks_3d.append(point_3d)
             else:
-                # Fallback: use zeros
                 landmarks_3d.append(np.zeros(3))
         
         return np.array(landmarks_3d)
@@ -295,24 +369,12 @@ class MultiCameraTracker:
     def process_frame(self):
         """
         Main processing pipeline: capture, detect, match, triangulate.
-        Returns: (frames, triangulated_hands, all_results)
-            - frames: list of camera frames
-            - triangulated_hands: list of (21, 3) landmark arrays
-            - all_results: MediaPipe results for visualization
         """
-        # Capture frames
         frames = self.capture_frames()
-        
-        # Detect hands in all cameras
         all_results = self.detect_hands_all_cameras(frames)
-        
-        # Extract 2D landmarks
         all_landmarks_2d = self.extract_landmarks_2d(all_results)
-        
-        # Match hands across cameras
         matched_groups = self.match_hands_across_cameras(all_landmarks_2d)
         
-        # Triangulate each matched hand
         triangulated_hands = []
         for group in matched_groups:
             landmarks_3d = self.triangulate_hand(all_landmarks_2d, group)

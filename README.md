@@ -38,7 +38,12 @@ This code uses the amazing features of Google's machine learning suite [MediaPip
     ~~~
     pip install opencv-python
     pip install pyqt5
-    pip install mediapipe==0.10.14 
+    pip install mediapipe==0.10.14
+    pip install pylsl # Optional: for Lab Streaming Layer support
+    ~~~
+4. Install the package in editable mode (recommended for development):
+    ~~~
+    pip install -e .
     ~~~
 
 
@@ -159,19 +164,32 @@ Frame 123 [3D Triangulated] - Index MCP: 12.34°, Index PIP: 45.67°, Index DIP:
 - Real-time tracking from webcam or video file
 - Kalman filter smoothing for stability
 - Record landmarks to CSV/NPZ files
-- **UDP broadcasting** for real-time streaming to other apps
+- **UDP & LSL Broadcasting**: Stream data to external applications (Unity, Matlab, LabRecorder, etc.)
+- **Modular Architecture**: Reusable `handtrack` python package.
 - Dark theme UI with intuitive controls
 
 <img src="docs/source/_static/stereo_hand_track.gif" alt="Stereo" width="500">
 
-**Figure:** Example of a stereo hand tracking with unity. 
+**Figure:** Example of a stereo hand tracking with unity.
 
-### HandTracker Class
-The HandTracker class can be easily imported and used in your own projects:
+### HandTracker Package Usage
+The project is now structured as a modular Python package `handtrack`. You can import and use core components in your own scripts:
+
 ```python
+# Monocular Tracking
 from handtrack.tracker import HandTracker
-tracker = HandTracker(visualize=True)  # Enable visualization
+tracker = HandTracker(visualize=True)
 tracker.run()
+
+# Stereo Tracking
+from handtrack.tracker.stereo import MultiCameraTracker
+tracker = MultiCameraTracker(camera_ids=[0, 1], calibration_file="calib.npz")
+tracker.initialize_cameras()
+
+# Broadcasting (UDP or LSL)
+from handtrack.io.broadcast import UDPBroadcaster, LSLBroadcaster
+lsl = LSLBroadcaster(stream_name="HandData")
+lsl.send_landmarks(...)
 ```
 
 ## Acknowledgement

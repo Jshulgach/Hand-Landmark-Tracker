@@ -10,17 +10,18 @@ license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
     "opencv-python>=4.5.0",
-    "mediapipe>=0.10.9,<0.10.14"
+    "mediapipe>=0.10.9,<0.10.14",
     #"numpy>=1.26.0", # 1.23.5
     "scipy",
     #"pandas",
     #"matplotlib",
-    #"pyyaml",
+    "pyyaml",
     "PyQt5>=5.15",
     "pyqtgraph",
     "PyOpenGL",
     "tqdm",
     #"pandas",
+    "pylsl",
 
     # For device communication
     "pyserial",

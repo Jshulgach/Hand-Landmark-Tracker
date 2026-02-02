@@ -9,14 +9,14 @@ import os
 
 # Camera IDs - ADD OR REMOVE CAMERAS HERE
 # Example: [0, 1] for 2 cameras, [0, 1, 2] for 3 cameras, etc.
-CAMERA_IDS = [1, 2]  # Modify this list to add/remove cameras
+CAMERA_IDS = [0, 1]  # Modify this list to add/remove cameras
 
 # Number of cameras (automatically calculated)
 NUM_CAMERAS = len(CAMERA_IDS)
 
 # Camera resolution (applied to all cameras)
-CAMERA_WIDTH = 1280
-CAMERA_HEIGHT = 720
+CAMERA_WIDTH = 640
+CAMERA_HEIGHT = 480
 
 # Frame rate target
 CAMERA_FPS = 30
@@ -27,12 +27,12 @@ PRIMARY_CAMERA_INDEX = 0
 # ==================== CALIBRATION SETTINGS ====================
 
 # Checkerboard pattern (inner corners)
-CHECKERBOARD_ROWS = 8     # Number of inner corners vertically
-CHECKERBOARD_COLS = 10      # Number of inner corners horizontally
-CHECKERBOARD_SQUARE_SIZE = 20.0  # Size of each square in mm
+CHECKERBOARD_ROWS = 5     # Number of inner corners vertically
+CHECKERBOARD_COLS = 7      # Number of inner corners horizontally
+CHECKERBOARD_SQUARE_SIZE = 32.0  # Size of each square in mm
 
 # ArUco marker settings (if board has markers)
-USE_ARUCO_BOARD = True
+USE_ARUCO_BOARD = False
 ARUCO_DICT = "DICT_6X6_250"  # ArUco dictionary type
 ARUCO_MARKER_SIZE = 15.0     # Marker size in mm
 
@@ -61,11 +61,11 @@ NUM_LANDMARKS = 21
 
 # 3D landmark filtering
 KALMAN_3D_PROCESS_NOISE = 1e-3
-KALMAN_3D_MEASUREMENT_NOISE = 1e-4
+KALMAN_3D_MEASUREMENT_NOISE = 2e-4
 
 # 1D angle filtering
 KALMAN_1D_PROCESS_NOISE = 0.1
-KALMAN_1D_MEASUREMENT_NOISE = 2.0
+KALMAN_1D_MEASUREMENT_NOISE = 4.0
 
 # ==================== UDP BROADCASTING ====================
 
