@@ -433,6 +433,22 @@ class StereoHandTrackerGUI(QMainWindow):
 
         layout.addWidget(udp_group)
 
+        # FPS Monitoring
+        fps_group = QGroupBox("Performance Monitor")
+        fps_layout = QVBoxLayout(fps_group)
+
+        self.fps_label = QLabel("FPS: 0.0")
+        self.fps_label.setStyleSheet("color: #00ff00; font-weight: bold;")
+        self.fps_label.setAlignment(Qt.AlignCenter)
+        fps_layout.addWidget(self.fps_label)
+
+        self.timing_label = QLabel("Capture: 0ms | Detect: 0ms | Tri: 0ms")
+        self.timing_label.setStyleSheet("color: #aaa; font-size: 10px;")
+        self.timing_label.setAlignment(Qt.AlignCenter)
+        fps_layout.addWidget(self.timing_label)
+
+        layout.addWidget(fps_group)
+
         # Tracking Control
         control_group = QGroupBox("Tracking Control")
         control_layout = QVBoxLayout(control_group)
@@ -681,7 +697,11 @@ class StereoHandTrackerGUI(QMainWindow):
         try:
             # Initialize tracker using package class
             # We pass in config values from our local config.py
-            from config import CALIBRATION_FILE, CAMERA_WIDTH, CAMERA_HEIGHT, MIN_CAMERAS_FOR_TRIANGULATION, HAND_MATCH_THRESHOLD
+            from config import (
+                CALIBRATION_FILE, CAMERA_WIDTH, CAMERA_HEIGHT, 
+                MIN_CAMERAS_FOR_TRIANGULATION, HAND_MATCH_THRESHOLD,
+                ENABLE_PARALLEL_PROCESSING, NUM_WORKER_THREADS
+            )
             
             self.tracker = MultiCameraTracker(
                 camera_ids=CAMERA_IDS,
@@ -691,7 +711,9 @@ class StereoHandTrackerGUI(QMainWindow):
                 num_landmarks=NUM_LANDMARKS,
                 max_hands=MAX_HANDS,
                 min_cameras=MIN_CAMERAS_FOR_TRIANGULATION,
-                match_threshold=HAND_MATCH_THRESHOLD
+                match_threshold=HAND_MATCH_THRESHOLD,
+                enable_parallel=ENABLE_PARALLEL_PROCESSING,
+                num_workers=NUM_WORKER_THREADS
             )
             
             if not self.tracker.initialize_cameras():
@@ -891,6 +913,28 @@ class StereoHandTrackerGUI(QMainWindow):
             self.frame_label.setText(f"Frames: {self.frame_count}")
             self.hands_label.setText(f"Hands: {num_hands}")
             self.tracked_hand_label.setText(f"Tracked Hand: {tracked_label}")
+            
+            # Update FPS display
+            if self.tracker:
+                fps_stats = self.tracker.get_fps_stats()
+                fps = fps_stats.get("fps", 0)
+                capture_ms = fps_stats.get("capture_ms", 0)
+                detection_ms = fps_stats.get("detection_ms", 0)
+                tri_ms = fps_stats.get("triangulation_ms", 0)
+                
+                # Color code FPS: green if >25, yellow if 15-25, red if <15
+                if fps > 25:
+                    fps_color = "#00ff00"
+                elif fps > 15:
+                    fps_color = "#ffff00"
+                else:
+                    fps_color = "#ff0000"
+                
+                self.fps_label.setText(f"FPS: {fps:.1f}")
+                self.fps_label.setStyleSheet(f"color: {fps_color}; font-weight: bold;")
+                self.timing_label.setText(
+                    f"Capture: {capture_ms:.1f}ms | Detect: {detection_ms:.1f}ms | Tri: {tri_ms:.1f}ms"
+                )
             
         except Exception as e:
             print(f"Error in update_frame: {e}")

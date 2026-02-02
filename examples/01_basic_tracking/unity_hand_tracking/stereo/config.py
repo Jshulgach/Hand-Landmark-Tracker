@@ -91,6 +91,21 @@ VIDEO_SECONDARY_HEIGHT = 360
 # Update rate (milliseconds)
 FRAME_UPDATE_INTERVAL = 33  # ~30 FPS
 
+# ==================== PARALLEL PROCESSING SETTINGS ====================
+
+# Enable parallel camera capture and MediaPipe detection
+ENABLE_PARALLEL_PROCESSING = True
+
+# Number of worker threads for parallel processing
+NUM_WORKER_THREADS = 4
+
+# FPS measurement window size (frames to average)
+FPS_MEASUREMENT_WINDOW = 30
+
+# Skip frames if processing falls behind (reduce jitter from buffering)
+# False = wait for frame to complete; True = drop old frames
+SKIP_FRAMES_IF_BEHIND = False
+
 # ==================== MODE SETTINGS ====================
 
 # Operating mode

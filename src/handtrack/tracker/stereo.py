@@ -1,14 +1,18 @@
 """
-Stereo (Multi-Camera) Tracker module.
+Stereo (Multi-Camera) Tracker module with parallel processing and FPS monitoring.
 """
 
 import cv2
 import numpy as np
 import mediapipe as mp
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+import threading
 
 class MultiCameraTracker:
-    """Tracks hands across multiple calibrated cameras."""
+    """Tracks hands across multiple calibrated cameras with parallel processing."""
     
     def __init__(self, 
                  camera_ids, 
@@ -19,7 +23,9 @@ class MultiCameraTracker:
                  max_hands=2,
                  triangulation_method='simple_average',
                  min_cameras=2,
-                 match_threshold=0.1):
+                 match_threshold=0.1,
+                 enable_parallel=True,
+                 num_workers=4):
         
         self.camera_ids = camera_ids
         self.num_cameras = len(camera_ids)
@@ -31,6 +37,11 @@ class MultiCameraTracker:
         self.triangulation_method = triangulation_method
         self.min_cameras = min_cameras
         self.match_threshold = match_threshold
+        
+        # Parallel processing settings
+        self.enable_parallel = enable_parallel
+        self.num_workers = num_workers
+        self.executor = ThreadPoolExecutor(max_workers=num_workers) if enable_parallel else None
         
         # Camera captures
         self.captures = []
@@ -46,6 +57,15 @@ class MultiCameraTracker:
         
         # Projection matrices for triangulation
         self.projection_matrices = []
+        
+        # FPS monitoring
+        self.frame_times = []
+        self.capture_times = []
+        self.detection_times = []
+        self.triangulation_times = []
+        self.fps_window_size = 30
+        self.last_frame_time = time.time()
+        self.frame_count = 0
         
         # Load calibration
         self.load_calibration()
@@ -81,6 +101,149 @@ class MultiCameraTracker:
             # Projection matrix P = K * [R|T]
             P = self.camera_matrices[idx] @ RT
             self.projection_matrices.append(P)
+    
+    # ==================== FPS MONITORING ====================
+    
+    def get_fps_stats(self):
+        """Return FPS statistics."""
+        if len(self.frame_times) < 2:
+            return {"fps": 0, "capture_ms": 0, "detection_ms": 0, "triangulation_ms": 0}
+        
+        # Calculate average of last N frames
+        recent_frame_times = self.frame_times[-self.fps_window_size:]
+        recent_capture_times = self.capture_times[-self.fps_window_size:]
+        recent_detection_times = self.detection_times[-self.fps_window_size:]
+        recent_tri_times = self.triangulation_times[-self.fps_window_size:]
+        
+        if len(recent_frame_times) > 1:
+            frame_deltas = np.diff(recent_frame_times)
+            avg_fps = 1.0 / np.mean(frame_deltas) if np.mean(frame_deltas) > 0 else 0
+        else:
+            avg_fps = 0
+        
+        return {
+            "fps": avg_fps,
+            "capture_ms": np.mean(recent_capture_times) * 1000 if recent_capture_times else 0,
+            "detection_ms": np.mean(recent_detection_times) * 1000 if recent_detection_times else 0,
+            "triangulation_ms": np.mean(recent_tri_times) * 1000 if recent_tri_times else 0,
+            "total_ms": np.mean([t2 - t1 for t1, t2 in zip(recent_frame_times[:-1], recent_frame_times[1:])]) * 1000
+        }
+    
+    # ==================== PARALLEL CAPTURE ====================
+    
+    def _capture_single_camera(self, cam_idx):
+        """Capture a single frame from a camera (for threading)."""
+        frame = None
+        cap = self.captures[cam_idx]
+        
+        if cap is not None and cap.isOpened():
+            try:
+                ret, frame = cap.read()
+                if not ret or frame is None or frame.size == 0:
+                    frame = None
+            except Exception as e:
+                print(f"Error reading from camera {self.camera_ids[cam_idx]}: {e}")
+                frame = None
+        
+        # Auto-reconnection
+        if frame is None:
+            if self.reconnect_camera(cam_idx):
+                try:
+                    ret, frame = self.captures[cam_idx].read()
+                    if not ret: frame = None
+                except:
+                    frame = None
+        
+        return cam_idx, frame
+    
+    def capture_frames(self):
+        """
+        Capture frames from all cameras in parallel.
+        Returns: list of frames indexed by camera index
+        """
+        t0 = time.time()
+        
+        if self.enable_parallel and self.executor:
+            # Submit all capture tasks
+            futures = []
+            for cam_idx in range(self.num_cameras):
+                future = self.executor.submit(self._capture_single_camera, cam_idx)
+                futures.append(future)
+            
+            # Collect results
+            frames = [None] * self.num_cameras
+            for future in futures:
+                try:
+                    cam_idx, frame = future.result(timeout=0.1)
+                    frames[cam_idx] = frame
+                except Exception as e:
+                    print(f"Capture timeout/error: {e}")
+            
+            capture_time = time.time() - t0
+            self.capture_times.append(capture_time)
+            return frames
+        else:
+            # Fallback to sequential capture
+            frames = []
+            for cam_idx in range(self.num_cameras):
+                _, frame = self._capture_single_camera(cam_idx)
+                frames.append(frame)
+            
+            capture_time = time.time() - t0
+            self.capture_times.append(capture_time)
+            return frames
+    
+    # ==================== PARALLEL DETECTION ====================
+    
+    def _detect_single_camera(self, cam_idx, frame):
+        """Detect hands in a single camera frame (for threading)."""
+        if frame is None:
+            return cam_idx, None
+        
+        try:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands_detectors[cam_idx].process(rgb)
+            return cam_idx, results
+        except Exception as e:
+            print(f"Detection error camera {cam_idx}: {e}")
+            return cam_idx, None
+    
+    def detect_hands_all_cameras(self, frames):
+        """
+        Detect hands in all camera frames in parallel.
+        Returns: list of detection results, one per camera
+        """
+        t0 = time.time()
+        
+        if self.enable_parallel and self.executor:
+            # Submit all detection tasks
+            futures = []
+            for cam_idx, frame in enumerate(frames):
+                future = self.executor.submit(self._detect_single_camera, cam_idx, frame)
+                futures.append(future)
+            
+            # Collect results
+            all_results = [None] * self.num_cameras
+            for future in futures:
+                try:
+                    cam_idx, results = future.result(timeout=0.2)
+                    all_results[cam_idx] = results
+                except Exception as e:
+                    print(f"Detection timeout/error: {e}")
+            
+            detection_time = time.time() - t0
+            self.detection_times.append(detection_time)
+            return all_results
+        else:
+            # Fallback to sequential detection
+            all_results = []
+            for cam_idx, frame in enumerate(frames):
+                _, results = self._detect_single_camera(cam_idx, frame)
+                all_results.append(results)
+            
+            detection_time = time.time() - t0
+            self.detection_times.append(detection_time)
+            return all_results
     
     def initialize_cameras(self):
         """Open all cameras and create MediaPipe detectors."""
@@ -206,26 +369,6 @@ class MultiCameraTracker:
             frames.append(frame)
         return frames
     
-    def detect_hands_all_cameras(self, frames):
-        """
-        Detect hands in all camera frames.
-        Returns: list of detection results, one per camera
-        """
-        all_results = []
-        
-        for idx, frame in enumerate(frames):
-            if frame is None:
-                all_results.append(None)
-                continue
-            
-            # Convert to RGB
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Detect hands
-            results = self.hands_detectors[idx].process(rgb)
-            all_results.append(results)
-        
-        return all_results
     
     def extract_landmarks_2d(self, results):
         """
@@ -368,10 +511,27 @@ class MultiCameraTracker:
     
     def process_frame(self):
         """
-        Main processing pipeline: capture, detect, match, triangulate.
+        Main processing pipeline: capture, detect, match, triangulate with timing.
         """
+        frame_start_time = time.time()
+        self.frame_times.append(frame_start_time)
+        self.frame_count += 1
+        
+        # Trim history if too long
+        if len(self.frame_times) > self.fps_window_size * 2:
+            self.frame_times = self.frame_times[-self.fps_window_size:]
+            self.capture_times = self.capture_times[-self.fps_window_size:]
+            self.detection_times = self.detection_times[-self.fps_window_size:]
+            self.triangulation_times = self.triangulation_times[-self.fps_window_size:]
+        
+        # Capture frames (parallel if enabled)
         frames = self.capture_frames()
+        
+        # Detect hands (parallel if enabled)
         all_results = self.detect_hands_all_cameras(frames)
+        
+        # Extract, match, triangulate
+        t_tri_start = time.time()
         all_landmarks_2d = self.extract_landmarks_2d(all_results)
         matched_groups = self.match_hands_across_cameras(all_landmarks_2d)
         
@@ -379,6 +539,9 @@ class MultiCameraTracker:
         for group in matched_groups:
             landmarks_3d = self.triangulate_hand(all_landmarks_2d, group)
             triangulated_hands.append(landmarks_3d)
+        
+        tri_time = time.time() - t_tri_start
+        self.triangulation_times.append(tri_time)
         
         return frames, triangulated_hands, all_results
     
@@ -389,5 +552,8 @@ class MultiCameraTracker:
         
         for hands in self.hands_detectors:
             hands.close()
+        
+        if self.executor:
+            self.executor.shutdown(wait=True)
         
         print("Multi-camera tracker cleanup complete")
