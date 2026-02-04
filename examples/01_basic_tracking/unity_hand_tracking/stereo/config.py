@@ -51,8 +51,8 @@ CALIBRATION_FLAGS = 0  # Use default OpenCV calibration flags
 # Hand detection
 MAX_HANDS = 2
 MODEL_COMPLEXITY = 1
-MIN_DETECTION_CONFIDENCE = 0.7
-MIN_TRACKING_CONFIDENCE = 0.5
+MIN_DETECTION_CONFIDENCE = 0.75
+MIN_TRACKING_CONFIDENCE = 0.7
 
 # Number of hand landmarks
 NUM_LANDMARKS = 21
@@ -61,7 +61,7 @@ NUM_LANDMARKS = 21
 
 # 3D landmark filtering
 KALMAN_3D_PROCESS_NOISE = 1e-3
-KALMAN_3D_MEASUREMENT_NOISE = 2e-4
+KALMAN_3D_MEASUREMENT_NOISE = 8e-4
 
 # 1D angle filtering
 KALMAN_1D_PROCESS_NOISE = 0.1
@@ -129,13 +129,13 @@ ANGLE_NAMES = [
 MIN_CAMERAS_FOR_TRIANGULATION = 2
 
 # Maximum reprojection error for valid triangulation (in pixels)
-MAX_REPROJECTION_ERROR = 10.0
+MAX_REPROJECTION_ERROR = 7.0
 
 # Method for combining multiple camera views
 # 'simple_average' - Average all triangulated points
 # 'weighted_average' - Weight by detection confidence
 # 'ransac' - Use RANSAC to reject outliers
-TRIANGULATION_METHOD = 'simple_average'
+TRIANGULATION_METHOD = 'weighted_average'
 
 # ==================== COORDINATE SYSTEM ====================
 
