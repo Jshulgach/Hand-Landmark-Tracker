@@ -16,6 +16,7 @@ import sys
 import time
 
 import cv2
+import mediapipe as mp
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QImage, QPalette, QPixmap
@@ -1189,62 +1190,13 @@ class StereoHandTrackerGUI(QMainWindow):
                     for hand_idx_in_cam, hand_landmarks in enumerate(
                         results.multi_hand_landmarks
                     ):
-                        h_frame, w_frame = display_frame.shape[:2]
-                        pts = []
-                        for lm in hand_landmarks.landmark:
-                            pts.append((int(lm.x * w_frame), int(lm.y * h_frame)))
-
-                        # Get valid landmarks for this specific hand in this specific camera
-                        valid_lms = valid_2d_landmarks.get(idx, {}).get(
-                            hand_idx_in_cam, [True] * 21
+                        mp.solutions.drawing_utils.draw_landmarks(
+                            display_frame,
+                            hand_landmarks,
+                            mp.solutions.hands.HAND_CONNECTIONS,
+                            mp.solutions.drawing_utils.DrawingSpec(color=(255, 255, 255), thickness=2, circle_radius=4),
+                            mp.solutions.drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2)
                         )
-
-                        finger_colors = {
-                            "thumb": (0, 255, 255),
-                            "index": (0, 200, 255),
-                            "middle": (0, 255, 100),
-                            "ring": (255, 150, 0),
-                            "pinky": (255, 0, 200),
-                            "palm": (200, 200, 200),
-                        }
-                        finger_connections = [
-                            ("thumb", [(0, 1), (1, 2), (2, 3), (3, 4)]),
-                            ("index", [(0, 5), (5, 6), (6, 7), (7, 8)]),
-                            ("middle", [(0, 9), (9, 10), (10, 11), (11, 12)]),
-                            ("ring", [(0, 13), (13, 14), (14, 15), (15, 16)]),
-                            ("pinky", [(0, 17), (17, 18), (18, 19), (19, 20)]),
-                            ("palm", [(5, 9), (9, 13), (13, 17)]),
-                        ]
-                        for finger_name, connections in finger_connections:
-                            color = finger_colors[finger_name]
-                            for a, b in connections:
-                                if valid_lms[a] and valid_lms[b]:
-                                    cv2.line(
-                                        display_frame,
-                                        pts[a],
-                                        pts[b],
-                                        color,
-                                        2,
-                                        cv2.LINE_AA,
-                                    )
-                        for i, pt in enumerate(pts):
-                            if valid_lms[i]:
-                                cv2.circle(
-                                    display_frame,
-                                    pt,
-                                    4,
-                                    (255, 255, 255),
-                                    -1,
-                                    cv2.LINE_AA,
-                                )
-                                cv2.circle(
-                                    display_frame,
-                                    pt,
-                                    4,
-                                    (100, 100, 100),
-                                    1,
-                                    cv2.LINE_AA,
-                                )
                 cv2.putText(
                     display_frame,
                     f"Camera {idx}",
