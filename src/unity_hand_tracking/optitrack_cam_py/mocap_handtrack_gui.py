@@ -1320,6 +1320,13 @@ class StereoHandTrackerGUI(QMainWindow):
         for idx, hand_landmarks in enumerate(filtered_hands):
             if hand_landmarks is None or len(hand_landmarks) == 0:
                 continue
+                
+            # Calculate centroid to keep the hand centered in the view quadrants
+            valid_points = [p for p in hand_landmarks if not np.all(p == 0)]
+            if not valid_points:
+                continue
+            centroid = np.mean(valid_points, axis=0)
+
             connections = [
                 (0, 1),
                 (1, 2),
@@ -1349,32 +1356,37 @@ class StereoHandTrackerGUI(QMainWindow):
                     p2 = points[end_idx]
                     if np.all(p1 == 0) or np.all(p2 == 0):
                         continue
+                        
+                    # Center around the filtered hand's centroid
+                    c_p1 = p1 - centroid
+                    c_p2 = p2 - centroid
+                    
                     if view_type == "top":
                         u1, v1 = (
-                            int(p1[0] * scale) + offset_x + 150,
-                            int(p1[2] * scale) + offset_y + 150,
+                            int(c_p1[0] * scale) + offset_x + 150,
+                            int(c_p1[2] * scale) + offset_y + 150,
                         )
                         u2, v2 = (
-                            int(p2[0] * scale) + offset_x + 150,
-                            int(p2[2] * scale) + offset_y + 150,
+                            int(c_p2[0] * scale) + offset_x + 150,
+                            int(c_p2[2] * scale) + offset_y + 150,
                         )
                     elif view_type == "front":
                         u1, v1 = (
-                            int(p1[0] * scale) + offset_x + 150,
-                            int(p1[1] * scale) + offset_y + 50,
+                            int(c_p1[0] * scale) + offset_x + 150,
+                            int(-c_p1[1] * scale) + offset_y + 150,
                         )
                         u2, v2 = (
-                            int(p2[0] * scale) + offset_x + 150,
-                            int(p2[1] * scale) + offset_y + 50,
+                            int(c_p2[0] * scale) + offset_x + 150,
+                            int(-c_p2[1] * scale) + offset_y + 150,
                         )
                     elif view_type == "side":
                         u1, v1 = (
-                            int(p1[2] * scale) + offset_x + 150,
-                            int(p1[1] * scale) + offset_y + 50,
+                            int(c_p1[2] * scale) + offset_x + 150,
+                            int(-c_p1[1] * scale) + offset_y + 150,
                         )
                         u2, v2 = (
-                            int(p2[2] * scale) + offset_x + 150,
-                            int(p2[1] * scale) + offset_y + 50,
+                            int(c_p2[2] * scale) + offset_x + 150,
+                            int(-c_p2[1] * scale) + offset_y + 150,
                         )
                     cv2.line(canvas, (u1, v1), (u2, v2), color, 1)
                     cv2.circle(canvas, (u1, v1), 2, color, -1)
