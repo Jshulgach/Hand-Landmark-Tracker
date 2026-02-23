@@ -1063,7 +1063,7 @@ class StereoHandTrackerGUI(QMainWindow):
             self.stop_tracking()
             return
         try:
-            frames, triangulated_hands_data, all_results = self.tracker.process_frame()
+            frames, triangulated_hands_data, all_results, valid_2d_landmarks = self.tracker.process_frame()
             num_hands = len(triangulated_hands_data)
             handedness_labels = self._handedness_labels(all_results)
             frame_landmarks = []
@@ -1075,7 +1075,7 @@ class StereoHandTrackerGUI(QMainWindow):
             
             all_best_cams = set()
             
-            for hand_idx, (landmarks_3d, best_cams) in enumerate(triangulated_hands_data):
+            for hand_idx, (landmarks_3d, best_cams, valid_lms) in enumerate(triangulated_hands_data):
                 all_best_cams.update(best_cams)
                 if self.apply_kalman and hand_idx < len(self.kalman_filters):
                     filtered_landmarks = np.array(
@@ -1160,11 +1160,15 @@ class StereoHandTrackerGUI(QMainWindow):
                     
                 # Draw per-finger coloured skeleton
                 if results and results.multi_hand_landmarks:
-                    for hand_landmarks in results.multi_hand_landmarks:
+                    for hand_idx_in_cam, hand_landmarks in enumerate(results.multi_hand_landmarks):
                         h_frame, w_frame = display_frame.shape[:2]
                         pts = []
                         for lm in hand_landmarks.landmark:
                             pts.append((int(lm.x * w_frame), int(lm.y * h_frame)))
+                            
+                        # Get valid landmarks for this specific hand in this specific camera
+                        valid_lms = valid_2d_landmarks.get(idx, {}).get(hand_idx_in_cam, [True]*21)
+                        
                         finger_colors = {
                             "thumb": (0, 255, 255),
                             "index": (0, 200, 255),
@@ -1184,16 +1188,18 @@ class StereoHandTrackerGUI(QMainWindow):
                         for finger_name, connections in finger_connections:
                             color = finger_colors[finger_name]
                             for a, b in connections:
-                                cv2.line(
-                                    display_frame, pts[a], pts[b], color, 2, cv2.LINE_AA
-                                )
+                                if valid_lms[a] and valid_lms[b]:
+                                    cv2.line(
+                                        display_frame, pts[a], pts[b], color, 2, cv2.LINE_AA
+                                    )
                         for i, pt in enumerate(pts):
-                            cv2.circle(
-                                display_frame, pt, 4, (255, 255, 255), -1, cv2.LINE_AA
-                            )
-                            cv2.circle(
-                                display_frame, pt, 4, (100, 100, 100), 1, cv2.LINE_AA
-                            )
+                            if valid_lms[i]:
+                                cv2.circle(
+                                    display_frame, pt, 4, (255, 255, 255), -1, cv2.LINE_AA
+                                )
+                                cv2.circle(
+                                    display_frame, pt, 4, (100, 100, 100), 1, cv2.LINE_AA
+                                )
                 cv2.putText(
                     display_frame,
                     f"Camera {idx}",

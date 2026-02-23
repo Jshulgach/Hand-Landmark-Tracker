@@ -477,13 +477,46 @@ class MultiCameraTracker:
             )
             return final_pt3d, camera_indices[:2], final_error
 
+    def _evaluate_cameras(self, landmarks_3d, all_landmarks_2d, matched_group):
+        """
+        Evaluate each camera's view of the 3D hand by projecting it back to 2D.
+        Returns:
+            camera_errors: dict of cam_idx -> list of 21 errors (or inf if missing)
+            valid_landmarks: dict of cam_idx -> list of 21 booleans
+        """
+        camera_errors = {}
+        valid_landmarks = {}
+        
+        for cam_idx, hand_idx in matched_group.items():
+            landmarks_2d, _, _ = all_landmarks_2d[cam_idx][hand_idx]
+            P = self.projection_matrices[cam_idx]
+            
+            errors = []
+            valids = []
+            for lm_idx in range(self.num_landmarks):
+                pt3d = landmarks_3d[lm_idx]
+                if np.all(pt3d == 0):
+                    errors.append(float('inf'))
+                    valids.append(False)
+                    continue
+                    
+                pt_h = np.append(pt3d, 1.0)
+                projected = P @ pt_h
+                projected = projected[:2] / projected[2]
+                
+                err = np.linalg.norm(projected - landmarks_2d[lm_idx])
+                errors.append(err)
+                valids.append(err <= MAX_REPROJECTION_ERROR)
+                
+            camera_errors[cam_idx] = errors
+            valid_landmarks[cam_idx] = valids
+            
+        return camera_errors, valid_landmarks
+
     def triangulate_hand(self, all_landmarks_2d, matched_group):
         """Triangulate all 21 landmarks for one matched hand → (21,3)."""
         landmarks_3d = []
         cam_indices = list(matched_group.keys())
-
-        # Keep track of which cameras were used for the majority of landmarks
-        camera_usage_counts = {cam_idx: 0 for cam_idx in range(self.num_cameras)}
 
         for lm_idx in range(self.num_landmarks):
             pts_2d = []
@@ -512,18 +545,27 @@ class MultiCameraTracker:
 
             if pt3d is not None:
                 landmarks_3d.append(pt3d)
-                for cam in used_cams:
-                    camera_usage_counts[cam] += 1
             else:
                 landmarks_3d.append(np.zeros(3))
 
-        # Determine the "optimal" cameras used for this hand (e.g. top 2 most used)
-        sorted_cams = sorted(
-            camera_usage_counts.items(), key=lambda x: x[1], reverse=True
-        )
-        best_cams = [cam for cam, count in sorted_cams if count > 0][:2]  # Get top 2
+        landmarks_3d_array = np.array(landmarks_3d)
+        
+        # Evaluate cameras to find the true "best" cameras and valid landmarks
+        camera_errors, valid_landmarks = self._evaluate_cameras(landmarks_3d_array, all_landmarks_2d, matched_group)
+        
+        # Determine the "optimal" cameras used for this hand based on number of valid landmarks
+        cam_scores = []
+        for cam_idx in cam_indices:
+            num_valid = sum(valid_landmarks[cam_idx])
+            # Average error of valid landmarks (or inf if none)
+            avg_err = np.mean([e for e, v in zip(camera_errors[cam_idx], valid_landmarks[cam_idx]) if v]) if num_valid > 0 else float('inf')
+            cam_scores.append((cam_idx, num_valid, avg_err))
+            
+        # Sort by num_valid (descending), then avg_err (ascending)
+        cam_scores.sort(key=lambda x: (-x[1], x[2]))
+        best_cams = [x[0] for x in cam_scores[:2]]
 
-        return np.array(landmarks_3d), best_cams
+        return landmarks_3d_array, best_cams, valid_landmarks
 
     # ------------------------------------------------------------------ #
     # Main per-frame pipeline
@@ -535,8 +577,9 @@ class MultiCameraTracker:
         Returns
         -------
         frames : list[ndarray]
-        triangulated_hands : list[tuple(ndarray (21,3), list[int])]
+        triangulated_hands : list[tuple(ndarray (21,3), list[int], dict)]
         all_results : list[mediapipe result | None]
+        valid_2d_landmarks : dict[cam_idx][hand_idx_in_cam] -> list[bool]
         """
         frames = self.capture_frames()
         all_results = self.detect_hands_all_cameras(frames)
@@ -546,9 +589,14 @@ class MultiCameraTracker:
         matched_groups = self.match_hands_across_cameras(all_landmarks_2d)
 
         triangulated_hands = []
+        valid_2d_landmarks = {cam_idx: {} for cam_idx in range(self.num_cameras)}
+        
         for group in matched_groups:
-            lm3d, best_cams = self.triangulate_hand(all_landmarks_2d, group)
-            triangulated_hands.append((lm3d, best_cams))
+            lm3d, best_cams, valid_lms = self.triangulate_hand(all_landmarks_2d, group)
+            triangulated_hands.append((lm3d, best_cams, valid_lms))
+            
+            for cam_idx, hand_idx_in_cam in group.items():
+                valid_2d_landmarks[cam_idx][hand_idx_in_cam] = valid_lms[cam_idx]
 
         self._triangulation_ms = (time.perf_counter() - t0) * 1000
 
@@ -558,7 +606,7 @@ class MultiCameraTracker:
         self._fps = 1.0 / dt if dt > 0 else 0.0
         self._t_prev = now
 
-        return frames, triangulated_hands, all_results
+        return frames, triangulated_hands, all_results, valid_2d_landmarks
 
     def get_fps_stats(self):
         return {
