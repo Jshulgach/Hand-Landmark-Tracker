@@ -348,6 +348,22 @@ class MultiCameraTracker:
             total_error += np.linalg.norm(projected - points_2d[k])
         return total_error / len(points_2d)
 
+    def _triangulate_n_views(self, points_2d, projection_matrices):
+        """
+        Triangulate a 3D point from N views using Direct Linear Transform (DLT) and SVD.
+        points_2d: list of (2,) arrays
+        projection_matrices: list of (3, 4) projection matrices
+        """
+        A = []
+        for pt, P in zip(points_2d, projection_matrices):
+            u, v = pt[0], pt[1]
+            A.append(u * P[2, :] - P[0, :])
+            A.append(v * P[2, :] - P[1, :])
+        A = np.array(A)
+        _, _, Vh = np.linalg.svd(A)
+        X = Vh[-1, :]
+        return X[:3] / X[3]
+
     def triangulate_landmark(self, points_2d, camera_indices, camera_confidences=None):
         """
         Triangulate one landmark from ≥2 views. Returns (pt3d, used_cameras, error) or (None, [], inf).
@@ -357,10 +373,39 @@ class MultiCameraTracker:
           - "weighted_average": ref-based pairs, weighted by camera_confidence
           - "reprojection":     all pairs, weighted by inverse reprojection error
           - "weighted_error":   finds the single pair with the lowest reprojection error
+          - "best_triplet":     finds the triplet of cameras with the lowest reprojection error using N-view DLT
         """
         n = len(points_2d)
         if n < 2:
             return None, [], float("inf")
+
+        if TRIANGULATION_METHOD == "best_triplet":
+            best_pt3d = None
+            best_error = float("inf")
+            best_cams = []
+
+            if n >= 3:
+                import itertools
+                for combo in itertools.combinations(range(n), 3):
+                    pts = [points_2d[idx] for idx in combo]
+                    Ps = [self.projection_matrices[camera_indices[idx]] for idx in combo]
+                    pt3d = self._triangulate_n_views(pts, Ps)
+                    
+                    # Calculate reprojection error for this triplet
+                    error = self._reprojection_error(
+                        pt3d,
+                        pts,
+                        [camera_indices[idx] for idx in combo],
+                    )
+
+                    if error < best_error:
+                        best_error = error
+                        best_pt3d = pt3d
+                        best_cams = [camera_indices[idx] for idx in combo]
+                return best_pt3d, best_cams, best_error
+            else:
+                # Fallback to best pair if < 3 cameras available
+                TRIANGULATION_METHOD = "weighted_error"
 
         if TRIANGULATION_METHOD == "weighted_error":
             best_pt3d = None
@@ -563,7 +608,10 @@ class MultiCameraTracker:
             
         # Sort by num_valid (descending), then avg_err (ascending)
         cam_scores.sort(key=lambda x: (-x[1], x[2]))
-        best_cams = [x[0] for x in cam_scores[:2]]
+        
+        # If we are using best_triplet, highlight the top 3 cameras, otherwise top 2
+        num_best_cams = 3 if TRIANGULATION_METHOD == "best_triplet" else 2
+        best_cams = [x[0] for x in cam_scores[:num_best_cams]]
 
         return landmarks_3d_array, best_cams, valid_landmarks
 

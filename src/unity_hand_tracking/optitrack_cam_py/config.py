@@ -142,7 +142,9 @@ MAX_REPROJECTION_ERROR = 10.0
 # 'simple_average' - Average all triangulated points
 # 'weighted_average' - Weight by detection confidence
 # 'reprojection' - Weight by reprojection confidence
-TRIANGULATION_METHOD = "weighted_error"
+# 'weighted_error' - Find the best pair of cameras with lowest reprojection error
+# 'best_triplet' - Find the best 3 cameras using N-view DLT triangulation
+TRIANGULATION_METHOD = "best_triplet"
 
 # ==================== COORDINATE SYSTEM ====================
 
