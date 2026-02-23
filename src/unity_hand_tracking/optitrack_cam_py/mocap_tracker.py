@@ -62,6 +62,9 @@ class MultiCameraTracker:
         self._detection_ms = 0.0
         self._triangulation_ms = 0.0
         self._camera_confidence = {}
+        
+        # Threshold for dropping occluded/bad landmarks
+        self.max_reprojection_error = MAX_REPROJECTION_ERROR
 
     # ------------------------------------------------------------------ #
     # Calibration
@@ -587,6 +590,10 @@ class MultiCameraTracker:
             pt3d, used_cams, error = self.triangulate_landmark(
                 pts_2d, valid_cams, confs
             )
+
+            # Drop landmark if reprojection error is too high (likely occluded/guessed)
+            if pt3d is not None and error > self.max_reprojection_error:
+                pt3d = None
 
             if pt3d is not None:
                 landmarks_3d.append(pt3d)

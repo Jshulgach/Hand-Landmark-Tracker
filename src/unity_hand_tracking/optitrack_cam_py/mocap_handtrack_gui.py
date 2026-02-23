@@ -473,6 +473,16 @@ class StereoHandTrackerGUI(QMainWindow):
         self.min_track_spin.valueChanged.connect(self.on_mp_params_changed)
         mp_layout.addWidget(self.min_track_spin, 1, 1)
 
+        mp_layout.addWidget(QLabel("Occlusion Threshold:"), 2, 0)
+        self.occlusion_spin = QDoubleSpinBox()
+        self.occlusion_spin.setRange(5.0, 200.0)
+        self.occlusion_spin.setSingleStep(5.0)
+        # We'll set the value later when tracker is initialized, or use config default
+        from config import MAX_REPROJECTION_ERROR
+        self.occlusion_spin.setValue(MAX_REPROJECTION_ERROR)
+        self.occlusion_spin.valueChanged.connect(self.on_occlusion_changed)
+        mp_layout.addWidget(self.occlusion_spin, 2, 1)
+
         processing_layout.addLayout(mp_layout)
 
         self.kalman_checkbox = QCheckBox("Enable Kalman Filter Smoothing")
@@ -694,6 +704,10 @@ class StereoHandTrackerGUI(QMainWindow):
             self.tracker.update_mp_params(
                 self.min_det_spin.value(), self.min_track_spin.value()
             )
+
+    def on_occlusion_changed(self):
+        if self.tracker:
+            self.tracker.max_reprojection_error = self.occlusion_spin.value()
 
     def on_kalman_params_changed(self):
         self.kalman_3d_process_noise = float(self.k3d_p.value())
@@ -947,6 +961,7 @@ class StereoHandTrackerGUI(QMainWindow):
         """Start multi-camera tracking."""
         try:
             self.tracker = MultiCameraTracker()
+            self.tracker.max_reprojection_error = self.occlusion_spin.value()
             if not self.tracker.initialize_cameras(
                 min_det_conf=self.min_det_spin.value(),
                 min_track_conf=self.min_track_spin.value(),
