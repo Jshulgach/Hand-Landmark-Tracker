@@ -588,11 +588,6 @@ class MultiCameraTracker:
                 pts_2d, valid_cams, confs
             )
 
-            # Thumb occlusion safety check
-            # If it's a thumb landmark and the reprojection error is too high, it's likely a guess
-            if lm_idx in [1, 2, 3, 4] and error > MAX_REPROJECTION_ERROR:
-                pt3d = None  # Drop the landmark, let Kalman filter predict
-
             if pt3d is not None:
                 landmarks_3d.append(pt3d)
             else:
