@@ -30,6 +30,7 @@ from config import (
     MAX_HANDS,
     NUM_CAMERAS,
     NUM_LANDMARKS,
+    TRIANGULATION_METHOD,
     UDP_IP,
     UDP_PORT_ANGLES,
     UDP_PORT_LANDMARKS,
@@ -149,7 +150,9 @@ def finger_bend_angles(landmarks):
             landmarks[pip], landmarks[dip], landmarks[tip]
         )
 
-    angles["thumb_cmc_mcp"] = joint_angle(landmarks[0], landmarks[2], landmarks[3])
+    # Thumb Treated separately
+    angles["thumb_cmc"] = joint_angle(landmarks[0], landmarks[1], landmarks[2])
+    angles["thumb_mcp"] = joint_angle(landmarks[1], landmarks[2], landmarks[3])
     angles["thumb_ip"] = joint_angle(landmarks[2], landmarks[3], landmarks[4])
 
     return angles
@@ -302,6 +305,12 @@ class StereoHandTrackerGUI(QMainWindow):
         camera_info = QLabel(f"Cameras: {NUM_CAMERAS}\nIDs: {CAMERA_IDS}")
         camera_info.setStyleSheet("color: #aaa;")
         camera_layout.addWidget(camera_info)
+
+        # Triangulation method info (subtle)
+        triang_info = QLabel(f"Triangulation: {TRIANGULATION_METHOD}")
+        triang_info.setStyleSheet("color: #888; font-size: 10px; font-style: italic;")
+        camera_layout.addWidget(triang_info)
+
         layout.addWidget(camera_group)
 
         # Processing Options

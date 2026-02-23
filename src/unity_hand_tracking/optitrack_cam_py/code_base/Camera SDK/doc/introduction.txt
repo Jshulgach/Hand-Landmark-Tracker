@@ -1,0 +1,60 @@
+
+This is a very simple introduction to a straight-forward API.
+
+Some basic concepts: The Camera Library SDK has a C++ API.  You, as
+a user, interact with the Camera Library through a set of basic 
+classes by including cameralibrary.h.  
+
+Now, on to the good stuff...
+
+Make sure the Camera Library header (cameralibrary.h) is in your
+compiler include path.  Including this header will define all the
+classes of interest and make them available.
+
+  #include "cameralibrary.h"
+  using namespace CameraLibrary;
+
+The simplest way to access a camera is to wait for the devices
+to initialize.  Then fetch a camera from the Camera Library.
+
+  CameraManager::X().WaitForInitialization();
+  Camera *camera = CameraManager::X().GetCamera();
+  if(!camera)
+  {
+    // failure
+  }
+
+Now that we have a camera, we can tell it to start sending us frames.
+
+  camera->Start();
+
+Once a camera is started, it will begin outputting camera frames.
+You can access these frames through the GetFrame() method.
+
+  Frame *frame = camera->GetFrame();
+  if(frame) 
+  {
+     // process frame
+     frame->Release();
+  }
+
+Frames are reference counted so make sure to call release when
+you're done with them.
+
+The above approach to fetching frames is considered a 'polling'
+technique.  Alternatively, you can receive notifications of incoming
+frames by utilizing the AttachListener() method.
+
+Cameras are also reference counted so it's important to release
+a camera when you are done with it.
+
+  camera->Release();
+
+When your application is closing down, it's important to also
+shutdown the Camera Library to ensure that the hardware is shutdown
+properly.
+
+  CameraManager::X().Shutdown();
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.

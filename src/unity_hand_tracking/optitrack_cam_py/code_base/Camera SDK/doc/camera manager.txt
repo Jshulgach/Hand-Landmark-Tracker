@@ -1,0 +1,55 @@
+
+The CameraManager is your starting point for using the Camera
+Library.  The CameraManager is implemented as a singleton design
+pattern.  This simply means you can access it anywhere in your
+program, there is only one CameraManager, and you don't need to
+worry about instantiating or deleting it.
+
+Lets start our program by including the appropriate header and
+namespace.
+
+  #include "cameralibrary.h"
+  using namespace CameraLibrary;
+
+Now, we always access the Camera Manager by 'CameraManager::X()'.
+This is the singleton implementation at work.  This makes it
+very simple to access from anywhere in your code.
+
+Lets get our devices initialized.
+
+  CameraManager::X().WaitForInitialization();
+
+At this point, connected cameras and devices should be initialized
+and ready for use.  More complicated approaches for initialization
+and why they are useful is discussed in device notification.txt.
+
+Lets quickly review everything the CameraManager is used for:
+
+- Lets us fetch cameras, hubs, and hardware keys.
+- Notifies us when a device is connected or removed.
+- Provides a list of connected devices via the CameraList, HubList,
+  and HardwareKeyList objects.
+
+To get a list of cameras, we can simply use the CameraList (see
+introduction.txt)
+
+  CameraList list;
+
+To fetch a single connected camera.
+
+  Camera *camera = CameraManager::X().GetCamera();
+  if(!camera)
+  {
+    // failure
+  }
+
+This is useful way to easily grab a camera when you don't care
+which one or make the assumption there is only one camera
+connected.
+
+To fetch multiple or specific cameras, reference multiple 
+cameras.txt.
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.
+

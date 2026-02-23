@@ -1,0 +1,69 @@
+
+Ok, lets assume we have already have a camera.  Lets tell it to start
+outputting frames.
+
+  camera->Start();
+
+Once a camera has been told to output frames, you can receive them via
+the GetFrame() method.
+
+  Frame *frame = camera->GetFrame();
+  if(frame)
+  {
+    // process frame
+    frame->Release();
+  }
+
+The type of data you receive in the Frame object depends on the camera
+video type.  You can set the camera video type via the camera->SetVideoType()
+method.
+
+Common video types are Segment, Object, Precision, Grayscale, and MJPEG.
+Not all camera devices support all video types.
+
+Segment, Object, and Precision video types contain optical tracking data
+while Grayscale and MJPEG are purely camera image data.
+
+All information and image data available in the Frame object is defined in
+the header file frame.h along with brief descriptions.  
+
+To print the number of objects, for example.
+
+  printf("Frame contains %d 2D objects", frame->ObjectCount());
+
+Another example, printing the center of the first object.
+
+  if(frame->ObjectCount()>0)
+  {
+    cObject *object = frame->Object(0);
+    printf("Object #0: (%d,%d)", object->X(), object->Y());
+  }
+
+One of the most common things a user wants to get out of the frame is the
+image.  The Frame object provides a mechanism for extracing the frame image.
+
+In order to receive the frame image, the user is expected to provide a
+buffer to place the image.  The size of the buffer should be large enough
+to receive the entire image.
+
+Here we'll assume the image is 640x480, but a better approach would be to
+check the pixel Width() and Height() of the camera.
+
+  char imageBuffer[640*480];
+
+Now, tell the frame to raster the image into the buffer.
+
+  frame->Rasterize(640,480,640,8,imageBuffer);
+
+The rasterize functionality will create a proper frame image for any type
+of frame.  See the grayscale sample for an example of rasterizing the
+frame image.
+
+Frames are reference counted so it's important to release a frame
+when you are done with it.
+
+  frame->Release();
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.
+

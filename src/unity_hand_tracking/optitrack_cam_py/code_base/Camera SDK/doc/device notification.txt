@@ -1,0 +1,48 @@
+
+In previous examples, to initialize devices we've used:
+
+  #include "cameralibrary.h"
+  using namespace CameraLibrary;
+
+  CameraManager::X().WaitForInitialization();
+
+It's important to note that the WaitForInitialization() method is
+blocking.  If you don't want your application to stall, you can
+alternatively call AreYouInitialized(), which is non-blocking.
+
+The idea is that your application can routinely poll the
+AreYouInitialized() method until the devices are initialized.
+
+  bool initialized = CameraManager::X().AreCamerasInitialized();
+
+Also of note, If you're developing a large application that may
+take several seconds to startup, you can get a head-start on device
+initialization by putting the following at your entry point.
+
+  CameraManager:X();
+
+This is optional but will 'get the ball rolling' so to speak as
+camera initialization takes a few seconds for USB devices and longer
+for ethernet devices--it might as well happen in parallel.
+
+Another caveat of the simple WaitForInitialization() call is that
+if there are no devices connected it will wait up to 5 seconds before
+returning.  This is due to the fact that if there are no devices seen
+it will want to wait around for ethernet cameras to report in to 
+ensure the WaitForInitialization doesn't return until all devices are
+detected.  This delay will likely be reduced in upcoming versions.
+
+One final mechanism that deserves mention for the discussion of
+device notification to be complete is CameraManager device
+notifications.
+
+If you want your application to receive device connection & removal
+notification, you'll want to inherit the CameraManagerListener class.
+
+  CameraManager::X().RegisterListener(listener);
+
+That object will then receive notifications of events.  For
+example, CameraConnected() and CameraRemoved() callbacks.
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.

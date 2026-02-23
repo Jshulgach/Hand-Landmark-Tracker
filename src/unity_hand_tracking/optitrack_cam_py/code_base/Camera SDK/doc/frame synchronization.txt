@@ -1,0 +1,70 @@
+
+One of the most powerful mechanisms of our software/hardware system
+is the ability to synchronize the time the shutter fires across
+multiple cameras.  Complementary to this, it's easy to receive this
+synchronized frame data in the CameraLibrary.
+
+First, lets initialize.
+
+  #include "cameralibrary.h"
+  using namespace CameraLibary;
+
+  CameraManager::X().WaitForInitialization();
+
+Now lets get some cameras.
+
+  CameraList list;
+
+  if(list.Count()<=1)
+  {
+    // failure, we need mulitple cameras
+  }
+
+  Camera *camera1 = CameraManager::X().GetCamera(list[1].UID());
+  Camera *camera2 = CameraManager::X().GetCamera(list[2].UID());
+
+  if(!camera1 || !camera2)
+  {
+    // failure
+  }
+
+Ok, now that we have two cameras, lets create a frame synchronizer
+module and connect them.
+
+  cModuleSync * sync = cModuleSync::Create();
+
+  sync->AddCamera(camera1);
+  sync->AddCamera(camera2);
+
+Once the synchronizer is attached to a camera, new frames will no
+longer be available through the basic camera->GetFrame() mechanism.
+
+Instead of fetching frames from individual cameras, now you fetch
+frame groups from the synchronizer.
+
+  FrameGroup *frameGroup = sync->GetFrameGroup();
+  if(frameGroup)
+  {
+    // process frame group
+    frameGroup->Release();
+  }
+
+FrameGroups are a group of frames, 1 frame per camera, all from the
+same shutter time.  It's so simple!
+
+Additionally, FrameGroup objects contain synchronization status 
+information to confirm cameras are properly synchronized.
+
+FrameGroups are reference counted so make sure to call release when
+you're done with them.
+
+Frame synchronization assumes that for USB devices you have the
+hardware properly synchronized by connection to an OptiHub or are 
+using wired-sync.  Ethernet devices are assumed to be on the same
+subnet.
+
+Check out the FrameSynchronization sample application.
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.
+

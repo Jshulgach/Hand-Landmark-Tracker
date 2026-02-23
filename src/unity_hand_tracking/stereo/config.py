@@ -9,7 +9,7 @@ import os
 
 # Camera IDs - ADD OR REMOVE CAMERAS HERE
 # Example: [0, 1] for 2 cameras, [0, 1, 2] for 3 cameras, etc.
-CAMERA_IDS = [0, 1]  # Modify this list to add/remove cameras
+CAMERA_IDS = [0, 1, 2]  # Modify this list to add/remove cameras
 
 # Number of cameras (automatically calculated)
 NUM_CAMERAS = len(CAMERA_IDS)
@@ -29,12 +29,12 @@ PRIMARY_CAMERA_INDEX = 0
 # Checkerboard pattern (inner corners)
 CHECKERBOARD_ROWS = 8  # Number of inner corners vertically
 CHECKERBOARD_COLS = 10  # Number of inner corners horizontally
-CHECKERBOARD_SQUARE_SIZE = 20.0  # Size of each square in mm
+CHECKERBOARD_SQUARE_SIZE = 15  # Size of each marker
 
 # ArUco marker settings (if board has markers)
 USE_ARUCO_BOARD = True
 ARUCO_DICT = "DICT_6X6_250"  # ArUco dictionary type
-ARUCO_MARKER_SIZE = 15.0  # Marker size in mm
+ARUCO_MARKER_SIZE = 11.0  # Marker size in mm
 
 # Calibration data paths
 CALIBRATION_DIR = "calibration_data"
@@ -60,12 +60,12 @@ NUM_LANDMARKS = 21
 # ==================== KALMAN FILTER SETTINGS ====================
 
 # 3D landmark filtering
-KALMAN_3D_PROCESS_NOISE = 1e-3
-KALMAN_3D_MEASUREMENT_NOISE = 1e-4
+KALMAN_3D_PROCESS_NOISE = 5e-3
+KALMAN_3D_MEASUREMENT_NOISE = 5e-4
 
 # 1D angle filtering
-KALMAN_1D_PROCESS_NOISE = 0.1
-KALMAN_1D_MEASUREMENT_NOISE = 2.0
+KALMAN_1D_PROCESS_NOISE = 0.3
+KALMAN_1D_MEASUREMENT_NOISE = 3.0
 
 # ==================== UDP BROADCASTING ====================
 
@@ -99,7 +99,7 @@ MULTI_CAMERA_MODE = NUM_CAMERAS > 1
 
 # ==================== JOINT ANGLE NAMES ====================
 
-# All 14 joint angles tracked
+# All 15 joint angles tracked
 ANGLE_NAMES = [
     "index_mcp",
     "index_pip",
@@ -113,7 +113,8 @@ ANGLE_NAMES = [
     "pinky_mcp",
     "pinky_pip",
     "pinky_dip",
-    "thumb_cmc_mcp",
+    "thumb_cmc",
+    "thumb_mcp",
     "thumb_ip",
 ]
 
@@ -129,7 +130,7 @@ MAX_REPROJECTION_ERROR = 10.0
 # 'simple_average' - Average all triangulated points
 # 'weighted_average' - Weight by detection confidence
 # 'ransac' - Use RANSAC to reject outliers
-TRIANGULATION_METHOD = "simple_average"
+TRIANGULATION_METHOD = "weighted_average"
 
 # ==================== COORDINATE SYSTEM ====================
 
