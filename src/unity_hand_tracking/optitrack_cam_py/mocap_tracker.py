@@ -555,7 +555,8 @@ class MultiCameraTracker:
 
                 err = np.linalg.norm(projected - landmarks_2d[lm_idx])
                 errors.append(err)
-                valids.append(err <= MAX_REPROJECTION_ERROR)
+                # Be lenient for 2D drawing: only hide if it's wildly off (> 100px)
+                valids.append(err <= 100.0)
 
             camera_errors[cam_idx] = errors
             valid_landmarks[cam_idx] = valids

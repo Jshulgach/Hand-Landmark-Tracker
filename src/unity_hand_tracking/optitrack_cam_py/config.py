@@ -136,8 +136,8 @@ ANGLE_NAMES = [
 MIN_CAMERAS_FOR_TRIANGULATION = 2
 
 # Maximum reprojection error for valid triangulation (in pixels)
-# Increased to 30.0 to prevent valid landmarks from disappearing due to minor calibration/triangulation noise
-MAX_REPROJECTION_ERROR = 30.0
+# Used to detect occluded thumbs (if error > this, the thumb is dropped)
+MAX_REPROJECTION_ERROR = 50.0
 
 # Method for combining multiple camera views
 # 'simple_average' - Average all triangulated points
