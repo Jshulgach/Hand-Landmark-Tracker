@@ -631,6 +631,9 @@ class MultiCameraTracker:
         num_best_cams = 3 if TRIANGULATION_METHOD == "best_triplet" else 2
         best_cams = [x[0] for x in cam_scores[:num_best_cams]]
 
+        # Debug print to help tune MAX_REPROJECTION_ERROR
+        # print(f"Cam scores (cam_idx, num_valid, avg_err): {cam_scores}")
+
         return landmarks_3d_array, best_cams, valid_landmarks
 
     # ------------------------------------------------------------------ #
