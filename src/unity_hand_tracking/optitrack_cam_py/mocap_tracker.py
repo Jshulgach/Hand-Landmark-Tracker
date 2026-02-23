@@ -22,6 +22,7 @@ from config import (
     MODEL_COMPLEXITY,
     NUM_LANDMARKS,
     TRIANGULATION_METHOD,
+    MAX_REPROJECTION_ERROR,
 )
 from multi_mjpeg import CameraManager
 
