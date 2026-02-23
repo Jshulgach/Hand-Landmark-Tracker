@@ -16,13 +16,13 @@ from config import (
     CALIBRATION_FILE,
     HAND_MATCH_THRESHOLD,
     MAX_HANDS,
+    MAX_REPROJECTION_ERROR,
     MIN_CAMERAS_FOR_TRIANGULATION,
     MIN_DETECTION_CONFIDENCE,
     MIN_TRACKING_CONFIDENCE,
     MODEL_COMPLEXITY,
     NUM_LANDMARKS,
     TRIANGULATION_METHOD,
-    MAX_REPROJECTION_ERROR,
 )
 from multi_mjpeg import CameraManager
 
@@ -379,18 +379,22 @@ class MultiCameraTracker:
         if n < 2:
             return None, [], float("inf")
 
-        if TRIANGULATION_METHOD == "best_triplet":
+        method = TRIANGULATION_METHOD
+        if method == "best_triplet":
             best_pt3d = None
             best_error = float("inf")
             best_cams = []
 
             if n >= 3:
                 import itertools
+
                 for combo in itertools.combinations(range(n), 3):
                     pts = [points_2d[idx] for idx in combo]
-                    Ps = [self.projection_matrices[camera_indices[idx]] for idx in combo]
+                    Ps = [
+                        self.projection_matrices[camera_indices[idx]] for idx in combo
+                    ]
                     pt3d = self._triangulate_n_views(pts, Ps)
-                    
+
                     # Calculate reprojection error for this triplet
                     error = self._reprojection_error(
                         pt3d,
@@ -405,9 +409,9 @@ class MultiCameraTracker:
                 return best_pt3d, best_cams, best_error
             else:
                 # Fallback to best pair if < 3 cameras available
-                TRIANGULATION_METHOD = "weighted_error"
+                method = "weighted_error"
 
-        if TRIANGULATION_METHOD == "weighted_error":
+        if method == "weighted_error":
             best_pt3d = None
             best_error = float("inf")
             best_pair = []
@@ -436,7 +440,7 @@ class MultiCameraTracker:
 
             return best_pt3d, best_pair, best_error
 
-        elif TRIANGULATION_METHOD == "reprojection":
+        elif method == "reprojection":
             # --- All unique camera pairs ---
             candidates = []
             for i in range(n):
@@ -469,7 +473,7 @@ class MultiCameraTracker:
             )
             return final_pt3d, camera_indices, final_error
 
-        elif TRIANGULATION_METHOD in ("simple_average", "weighted_average"):
+        elif method in ("simple_average", "weighted_average"):
             # --- Original ref-based pair approach ---
             tri_pts = []
             ref_idx = camera_indices[0]
@@ -490,7 +494,7 @@ class MultiCameraTracker:
 
             if (
                 camera_confidences is not None
-                and TRIANGULATION_METHOD == "weighted_average"
+                and method == "weighted_average"
             ):
                 weights = np.array(camera_confidences[1:], dtype=np.float64)
                 wsum = weights.sum()
@@ -531,31 +535,31 @@ class MultiCameraTracker:
         """
         camera_errors = {}
         valid_landmarks = {}
-        
+
         for cam_idx, hand_idx in matched_group.items():
             landmarks_2d, _, _ = all_landmarks_2d[cam_idx][hand_idx]
             P = self.projection_matrices[cam_idx]
-            
+
             errors = []
             valids = []
             for lm_idx in range(self.num_landmarks):
                 pt3d = landmarks_3d[lm_idx]
                 if np.all(pt3d == 0):
-                    errors.append(float('inf'))
+                    errors.append(float("inf"))
                     valids.append(False)
                     continue
-                    
+
                 pt_h = np.append(pt3d, 1.0)
                 projected = P @ pt_h
                 projected = projected[:2] / projected[2]
-                
+
                 err = np.linalg.norm(projected - landmarks_2d[lm_idx])
                 errors.append(err)
                 valids.append(err <= MAX_REPROJECTION_ERROR)
-                
+
             camera_errors[cam_idx] = errors
             valid_landmarks[cam_idx] = valids
-            
+
         return camera_errors, valid_landmarks
 
     def triangulate_hand(self, all_landmarks_2d, matched_group):
@@ -594,21 +598,35 @@ class MultiCameraTracker:
                 landmarks_3d.append(np.zeros(3))
 
         landmarks_3d_array = np.array(landmarks_3d)
-        
+
         # Evaluate cameras to find the true "best" cameras and valid landmarks
-        camera_errors, valid_landmarks = self._evaluate_cameras(landmarks_3d_array, all_landmarks_2d, matched_group)
-        
+        camera_errors, valid_landmarks = self._evaluate_cameras(
+            landmarks_3d_array, all_landmarks_2d, matched_group
+        )
+
         # Determine the "optimal" cameras used for this hand based on number of valid landmarks
         cam_scores = []
         for cam_idx in cam_indices:
             num_valid = sum(valid_landmarks[cam_idx])
             # Average error of valid landmarks (or inf if none)
-            avg_err = np.mean([e for e, v in zip(camera_errors[cam_idx], valid_landmarks[cam_idx]) if v]) if num_valid > 0 else float('inf')
+            avg_err = (
+                np.mean(
+                    [
+                        e
+                        for e, v in zip(
+                            camera_errors[cam_idx], valid_landmarks[cam_idx]
+                        )
+                        if v
+                    ]
+                )
+                if num_valid > 0
+                else float("inf")
+            )
             cam_scores.append((cam_idx, num_valid, avg_err))
-            
+
         # Sort by num_valid (descending), then avg_err (ascending)
         cam_scores.sort(key=lambda x: (-x[1], x[2]))
-        
+
         # If we are using best_triplet, highlight the top 3 cameras, otherwise top 2
         num_best_cams = 3 if TRIANGULATION_METHOD == "best_triplet" else 2
         best_cams = [x[0] for x in cam_scores[:num_best_cams]]
@@ -638,11 +656,11 @@ class MultiCameraTracker:
 
         triangulated_hands = []
         valid_2d_landmarks = {cam_idx: {} for cam_idx in range(self.num_cameras)}
-        
+
         for group in matched_groups:
             lm3d, best_cams, valid_lms = self.triangulate_hand(all_landmarks_2d, group)
             triangulated_hands.append((lm3d, best_cams, valid_lms))
-            
+
             for cam_idx, hand_idx_in_cam in group.items():
                 valid_2d_landmarks[cam_idx][hand_idx_in_cam] = valid_lms[cam_idx]
 
