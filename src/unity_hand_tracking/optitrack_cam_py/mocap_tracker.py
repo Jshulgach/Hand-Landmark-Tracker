@@ -14,7 +14,6 @@ import mediapipe as mp
 import numpy as np
 from config import (
     CALIBRATION_FILE,
-    HAND_MATCH_THRESHOLD,
     MAX_HANDS,
     MAX_REPROJECTION_ERROR,
     MIN_CAMERAS_FOR_TRIANGULATION,
@@ -23,6 +22,7 @@ from config import (
     MODEL_COMPLEXITY,
     NUM_LANDMARKS,
     TRIANGULATION_METHOD,
+    UPSIDE_DOWN_CAMERAS,
 )
 from multi_mjpeg import CameraManager
 
@@ -62,7 +62,7 @@ class MultiCameraTracker:
         self._detection_ms = 0.0
         self._triangulation_ms = 0.0
         self._camera_confidence = {}
-        
+
         # Threshold for dropping occluded/bad landmarks
         self.max_reprojection_error = MAX_REPROJECTION_ERROR
 
@@ -187,10 +187,16 @@ class MultiCameraTracker:
     # Hand detection (parallelised)
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _detect_single_camera(detector, frame):
+    def _detect_single_camera(detector, frame, cam_idx):
         """Run MediaPipe on one frame. Designed to run in a thread."""
         if frame is None:
             return None
+
+        # If the camera is physically upside down, rotate the image 180 degrees
+        # so MediaPipe can detect the hand properly.
+        if cam_idx in UPSIDE_DOWN_CAMERAS:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return detector.process(rgb)
 
@@ -204,6 +210,7 @@ class MultiCameraTracker:
                 self._detect_single_camera,
                 self.hands_detectors[idx],
                 frame,
+                idx,
             )
             futures.append(fut)
 
@@ -247,6 +254,11 @@ class MultiCameraTracker:
                     [[lm.x, lm.y] for lm in hand_landmarks.landmark]
                 )
 
+                # If the camera is upside down, we rotated the image 180 degrees before MediaPipe.
+                # We must rotate the normalized coordinates back 180 degrees so they match the calibration.
+                if cam_idx in UPSIDE_DOWN_CAMERAS:
+                    landmarks_norm = 1.0 - landmarks_norm
+
                 # Extract individual landmark confidences (visibility/presence)
                 # MediaPipe Hands doesn't explicitly expose per-landmark confidence in the same way Pose does,
                 # but we can use the z-coordinate (depth) or just the overall camera confidence as a fallback.
@@ -284,10 +296,10 @@ class MultiCameraTracker:
     # ------------------------------------------------------------------ #
     def match_hands_across_cameras(self, all_landmarks_2d):
         """
-        Greedy matching: for each hand in the reference camera, find the closest
-        hand in every other enabled camera by centroid distance.
-
-        Returns list of dicts  {cam_idx: hand_idx_in_that_camera}
+        Match hands across cameras.
+        Since MAX_HANDS is typically 1, we simply group the first detected hand
+        from each camera together.
+        (2D centroid matching is invalid for widely spaced cameras).
         """
         # Determine which cameras are active for triangulation
         if self._enabled_cameras is not None:
@@ -298,44 +310,17 @@ class MultiCameraTracker:
         if len(active) < MIN_CAMERAS_FOR_TRIANGULATION:
             return []
 
-        # Use first enabled camera as reference
-        ref_cam = active[0]
-        if not all_landmarks_2d[ref_cam]:
-            return []
+        # If we only track 1 hand, just group the first hand from every camera that saw one
+        group = {}
+        for cam_idx in active:
+            if all_landmarks_2d[cam_idx]:
+                # Just take the first hand detected in this camera
+                group[cam_idx] = 0
 
-        matched_groups = []
+        if len(group) >= MIN_CAMERAS_FOR_TRIANGULATION:
+            return [group]
 
-        for hand_idx_ref, (landmarks_ref, _conf_ref, _lm_confs_ref) in enumerate(
-            all_landmarks_2d[ref_cam]
-        ):
-            group = {ref_cam: hand_idx_ref}
-            centroid_ref = np.mean(landmarks_ref, axis=0)
-
-            for cam_idx in active:
-                if cam_idx == ref_cam:
-                    continue
-                if not all_landmarks_2d[cam_idx]:
-                    continue
-
-                best_idx = None
-                best_dist = float("inf")
-
-                for hand_idx, (landmarks, _conf, _lm_confs) in enumerate(
-                    all_landmarks_2d[cam_idx]
-                ):
-                    centroid = np.mean(landmarks, axis=0)
-                    dist = np.linalg.norm(centroid - centroid_ref) / self.img_width
-                    if dist < best_dist and dist < HAND_MATCH_THRESHOLD:
-                        best_dist = dist
-                        best_idx = hand_idx
-
-                if best_idx is not None:
-                    group[cam_idx] = best_idx
-
-            if len(group) >= MIN_CAMERAS_FOR_TRIANGULATION:
-                matched_groups.append(group)
-
-        return matched_groups
+        return []
 
     # ------------------------------------------------------------------ #
     # Triangulation
@@ -367,11 +352,116 @@ class MultiCameraTracker:
         X = Vh[-1, :]
         return X[:3] / X[3]
 
+    def _per_camera_reprojection_errors(self, pt3d, points_2d, camera_indices):
+        """Compute reprojection error for each camera individually.
+
+        Returns list of (cam_index, error) tuples in the same order as inputs.
+        """
+        pt_h = np.append(pt3d, 1.0)
+        errors = []
+        for k in range(len(points_2d)):
+            P = self.projection_matrices[camera_indices[k]]
+            projected = P @ pt_h
+            projected = projected[:2] / projected[2]
+            err = np.linalg.norm(projected - points_2d[k])
+            errors.append(err)
+        return errors
+
+    def _ransac_triangulate(
+        self,
+        points_2d,
+        camera_indices,
+        reproj_threshold=MAX_REPROJECTION_ERROR,
+        min_inliers=2,
+    ):
+        """
+        RANSAC-based triangulation: find the 3D point supported by the most cameras.
+
+        1. Try all possible pairs of cameras as hypotheses.
+        2. For each pair, triangulate a candidate 3D point.
+        3. Check which OTHER cameras agree (reprojection error < threshold).
+        4. The candidate with the most inliers wins.
+        5. Re-triangulate using only the inlier cameras via N-view DLT.
+
+        Returns (pt3d, inlier_cam_indices, error) or (None, [], inf).
+        """
+        n = len(points_2d)
+        if n < 2:
+            return None, [], float("inf")
+
+        # If only 2 cameras, just do DLT directly (no outlier to reject)
+        if n == 2:
+            Ps = [self.projection_matrices[idx] for idx in camera_indices]
+            pt3d = self._triangulate_n_views(points_2d, Ps)
+            error = self._reprojection_error(pt3d, points_2d, camera_indices)
+            return pt3d, list(camera_indices), error
+
+        best_pt3d = None
+        best_inlier_indices = []
+        best_inlier_pts = []
+        best_score = -1
+        best_error = float("inf")
+
+        # Try every pair as a hypothesis
+        for i in range(n):
+            for j in range(i + 1, n):
+                # Triangulate from this pair
+                P_i = self.projection_matrices[camera_indices[i]]
+                P_j = self.projection_matrices[camera_indices[j]]
+                candidate = self._triangulate_n_views(
+                    [points_2d[i], points_2d[j]], [P_i, P_j]
+                )
+
+                # Check all cameras against this candidate
+                per_cam_errors = self._per_camera_reprojection_errors(
+                    candidate, points_2d, camera_indices
+                )
+
+                # Count inliers
+                inlier_local_indices = [
+                    k for k, err in enumerate(per_cam_errors) if err < reproj_threshold
+                ]
+
+                num_inliers = len(inlier_local_indices)
+                avg_inlier_error = (
+                    np.mean([per_cam_errors[k] for k in inlier_local_indices])
+                    if num_inliers > 0
+                    else float("inf")
+                )
+
+                # Prefer more inliers, then lower error
+                if (num_inliers > best_score) or (
+                    num_inliers == best_score and avg_inlier_error < best_error
+                ):
+                    best_score = num_inliers
+                    best_error = avg_inlier_error
+                    best_inlier_indices = [
+                        camera_indices[k] for k in inlier_local_indices
+                    ]
+                    best_inlier_pts = [points_2d[k] for k in inlier_local_indices]
+
+        # Re-triangulate using only inlier cameras for the best result
+        if best_score >= min_inliers and len(best_inlier_pts) >= 2:
+            Ps = [self.projection_matrices[idx] for idx in best_inlier_indices]
+            best_pt3d = self._triangulate_n_views(best_inlier_pts, Ps)
+            best_error = self._reprojection_error(
+                best_pt3d, best_inlier_pts, best_inlier_indices
+            )
+            return best_pt3d, best_inlier_indices, best_error
+
+        # Fallback: use all cameras via DLT
+        Ps = [self.projection_matrices[idx] for idx in camera_indices]
+        pt3d = self._triangulate_n_views(points_2d, Ps)
+        error = self._reprojection_error(pt3d, points_2d, camera_indices)
+        return pt3d, list(camera_indices), error
+
     def triangulate_landmark(self, points_2d, camera_indices, camera_confidences=None):
         """
         Triangulate one landmark from ≥2 views. Returns (pt3d, used_cameras, error) or (None, [], inf).
 
         TRIANGULATION_METHOD controls behavior:
+          - "ransac":           RANSAC-based outlier rejection + N-view DLT (recommended)
+          - "n_view_dlt":       All cameras via DLT (no outlier rejection)
           - "simple_average":   ref-based pairs, unweighted mean
           - "weighted_average": ref-based pairs, weighted by camera_confidence
           - "reprojection":     all pairs, weighted by inverse reprojection error
@@ -383,6 +473,16 @@ class MultiCameraTracker:
             return None, [], float("inf")
 
         method = TRIANGULATION_METHOD
+
+        if method == "ransac":
+            return self._ransac_triangulate(points_2d, camera_indices)
+
+        if method == "n_view_dlt":
+            Ps = [self.projection_matrices[idx] for idx in camera_indices]
+            pt3d = self._triangulate_n_views(points_2d, Ps)
+            error = self._reprojection_error(pt3d, points_2d, camera_indices)
+            return pt3d, camera_indices, error
+
         if method == "best_triplet":
             best_pt3d = None
             best_error = float("inf")
@@ -495,10 +595,7 @@ class MultiCameraTracker:
                 pt3d = pt4d[:3] / pt4d[3]
                 tri_pts.append(pt3d.flatten())
 
-            if (
-                camera_confidences is not None
-                and method == "weighted_average"
-            ):
+            if camera_confidences is not None and method == "weighted_average":
                 weights = np.array(camera_confidences[1:], dtype=np.float64)
                 wsum = weights.sum()
                 if wsum > 0:
@@ -547,7 +644,7 @@ class MultiCameraTracker:
             valids = []
             for lm_idx in range(self.num_landmarks):
                 pt3d = landmarks_3d[lm_idx]
-                if np.all(pt3d == 0):
+                if np.linalg.norm(pt3d) < 1e-3:
                     errors.append(float("inf"))
                     valids.append(False)
                     continue
@@ -567,8 +664,15 @@ class MultiCameraTracker:
         return camera_errors, valid_landmarks
 
     def triangulate_hand(self, all_landmarks_2d, matched_group):
-        """Triangulate all 21 landmarks for one matched hand → (21,3)."""
+        """Triangulate all 21 landmarks for one matched hand → (21,3).
+
+        Also returns per-landmark metadata for confidence-adaptive filtering:
+        - reproj_errors: (21,) array of reprojection errors
+        - num_cameras_per_lm: (21,) array of how many cameras saw each landmark
+        """
         landmarks_3d = []
+        reproj_errors = []
+        num_cameras_per_lm = []
         cam_indices = list(matched_group.keys())
 
         for lm_idx in range(self.num_landmarks):
@@ -597,10 +701,16 @@ class MultiCameraTracker:
 
             if pt3d is not None:
                 landmarks_3d.append(pt3d)
+                reproj_errors.append(error)
+                num_cameras_per_lm.append(len(used_cams))
             else:
                 landmarks_3d.append(np.zeros(3))
+                reproj_errors.append(float("inf"))
+                num_cameras_per_lm.append(0)
 
         landmarks_3d_array = np.array(landmarks_3d)
+        reproj_errors = np.array(reproj_errors)
+        num_cameras_per_lm = np.array(num_cameras_per_lm)
 
         # Evaluate cameras to find the true "best" cameras and valid landmarks
         camera_errors, valid_landmarks = self._evaluate_cameras(
@@ -637,7 +747,13 @@ class MultiCameraTracker:
         # Debug print to help tune MAX_REPROJECTION_ERROR
         # print(f"Cam scores (cam_idx, num_valid, avg_err): {cam_scores}")
 
-        return landmarks_3d_array, best_cams, valid_landmarks
+        return (
+            landmarks_3d_array,
+            best_cams,
+            valid_landmarks,
+            reproj_errors,
+            num_cameras_per_lm,
+        )
 
     # ------------------------------------------------------------------ #
     # Main per-frame pipeline
@@ -664,8 +780,10 @@ class MultiCameraTracker:
         valid_2d_landmarks = {cam_idx: {} for cam_idx in range(self.num_cameras)}
 
         for group in matched_groups:
-            lm3d, best_cams, valid_lms = self.triangulate_hand(all_landmarks_2d, group)
-            triangulated_hands.append((lm3d, best_cams, valid_lms))
+            lm3d, best_cams, valid_lms, reproj_errs, n_cams = self.triangulate_hand(
+                all_landmarks_2d, group
+            )
+            triangulated_hands.append((lm3d, best_cams, valid_lms, reproj_errs, n_cams))
 
             for cam_idx, hand_idx_in_cam in group.items():
                 valid_2d_landmarks[cam_idx][hand_idx_in_cam] = valid_lms[cam_idx]

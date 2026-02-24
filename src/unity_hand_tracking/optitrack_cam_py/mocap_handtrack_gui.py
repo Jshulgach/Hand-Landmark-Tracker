@@ -14,6 +14,7 @@ import argparse
 import os
 import sys
 import time
+import threading
 
 import cv2
 import mediapipe as mp
@@ -61,7 +62,6 @@ from config import (
     MIN_DETECTION_CONFIDENCE,
     MIN_TRACKING_CONFIDENCE,
     NUM_LANDMARKS,
-    TRIANGULATION_METHOD,
     UDP_IP,
     UDP_PORT_ANGLES,
     UDP_PORT_LANDMARKS,
@@ -83,29 +83,89 @@ except ImportError:
 # Kalman Filters
 # =============================================================================
 class Kalman3D:
-    """3D Kalman filter for landmark smoothing."""
+    """3D Kalman filter with confidence-adaptive measurement noise.
+
+    The measurement noise R is scaled dynamically based on:
+    - reprojection_error: higher error → less trust in measurement
+    - num_cameras: fewer cameras → less trust in measurement
+
+    Also includes:
+    - Temporal outlier rejection: measurements that jump too far are dampened
+    - Velocity damping: prevents jitter accumulation
+    """
+
+    # Maximum jump (mm) before a measurement is treated as a temporal outlier
+    MAX_JUMP_MM = 80.0
+    # Velocity damping factor applied each predict step (0.95 = slight damping)
+    VELOCITY_DAMPING = 0.95
 
     def __init__(self, dt=1 / 30, process_noise=1e-3, measurement_noise=1e-2):
-        self.x = np.zeros((6, 1))
+        self.x = np.zeros((6, 1))  # [x, y, z, vx, vy, vz]
         self.F = np.eye(6)
         for i in range(3):
             self.F[i, i + 3] = dt
         self.H = np.hstack((np.eye(3), np.zeros((3, 3))))
         self.P = np.eye(6)
         self.Q = np.eye(6) * process_noise
+        self.R_base = measurement_noise  # Base measurement noise
         self.R = np.eye(3) * measurement_noise
+        self._initialized = False
+        self._frames_lost = 0
 
-    def update(self, z):
+    def update(self, z, reprojection_error=0.0, num_cameras=2):
+        if z is None or (isinstance(z, np.ndarray) and np.linalg.norm(z) < 1e-3):
+            # Landmark lost — increment lost counter, damp velocity, return last known position
+            self._frames_lost += 1
+            if self._frames_lost > 5:
+                # Lost for too long — reset to zero so it isn't drawn
+                self.x[3:] = 0
+                return np.zeros(3)
+            # Damp velocity hard when lost
+            self.x[3:] *= 0.5
+            # Predict-only (coast)
+            self.x = self.F @ self.x
+            self.P = self.F @ self.P @ self.F.T + self.Q
+            return self.x[:3].flatten()
+
+        self._frames_lost = 0
+        z = np.reshape(z, (3, 1))
+
+        # If the filter hasn't been initialized yet, snap directly
+        if not self._initialized:
+            self.x[:3] = z
+            self.x[3:] = 0
+            self._initialized = True
+            return self.x[:3].flatten()
+
+        # ---- Adaptive measurement noise ----
+        # Scale R based on reprojection error and number of cameras
+        # More cameras + lower error = more trust (lower R)
+        error_scale = 1.0 + (reprojection_error / 10.0) ** 2  # quadratic penalty
+        camera_scale = 2.0 / max(num_cameras, 1)  # 2 cams = 1.0, 4 cams = 0.5
+        adaptive_noise = self.R_base * error_scale * camera_scale
+        self.R = np.eye(3) * adaptive_noise
+
+        # ---- Predict ----
+        # Apply velocity damping to prevent jitter accumulation
+        self.x[3:] *= self.VELOCITY_DAMPING
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
 
-        if z is not None and not (isinstance(z, np.ndarray) and np.all(z == 0)):
-            z = np.reshape(z, (3, 1))
-            y = z - self.H @ self.x
-            S = self.H @ self.P @ self.H.T + self.R
-            K = self.P @ self.H.T @ np.linalg.inv(S)
-            self.x += K @ y
-            self.P = (np.eye(6) - K @ self.H) @ self.P
+        # ---- Temporal outlier rejection ----
+        predicted_pos = self.H @ self.x
+        jump = np.linalg.norm(z - predicted_pos)
+        if jump > self.MAX_JUMP_MM:
+            # Huge jump — likely a detection glitch. Heavily inflate R so the
+            # filter barely moves toward this suspect measurement.
+            outlier_scale = (jump / self.MAX_JUMP_MM) ** 2
+            self.R *= outlier_scale
+
+        # ---- Update ----
+        y = z - self.H @ self.x
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+        self.x += K @ y
+        self.P = (np.eye(6) - K @ self.H) @ self.P
 
         return self.x[:3].flatten()
 
@@ -131,6 +191,77 @@ class Kalman1D:
         self.x += K @ y
         self.P = (np.eye(2) - K @ self.H) @ self.P
         return self.x[0, 0]
+
+
+# =============================================================================
+# Processing Thread (Phase 4 — decoupled pipeline)
+# =============================================================================
+class ProcessingThread(threading.Thread):
+    """Background thread that runs capture → detect → triangulate continuously.
+
+    The GUI polls *get_latest()* at its own refresh rate so
+    processing throughput is decoupled from rendering.
+    """
+
+    def __init__(self, tracker):
+        super().__init__(daemon=True, name="ProcessingThread")
+        self.tracker = tracker
+        self._running = True
+        self._paused = threading.Event()   # set = running, clear = paused
+        self._paused.set()
+        self._lock = threading.Lock()
+        self._latest_result = None
+        # Processing FPS tracking
+        self._proc_fps = 0.0
+        self._t_prev = time.perf_counter()
+
+    # -- main loop ----------------------------------------------------------
+    def run(self):
+        while self._running:
+            # Honor pause requests (used when updating MediaPipe params)
+            self._paused.wait()
+            if not self._running:
+                break
+            try:
+                result = self.tracker.process_frame()
+                with self._lock:
+                    self._latest_result = result
+                # Track processing FPS
+                now = time.perf_counter()
+                dt = now - self._t_prev
+                self._proc_fps = 1.0 / dt if dt > 0 else 0.0
+                self._t_prev = now
+                # Yield CPU so we don't starve other processes
+                time.sleep(0.001)
+            except Exception as e:
+                print(f"[ProcessingThread] Error: {e}")
+                self._running = False
+                break
+
+    # -- public API (call from GUI thread) ----------------------------------
+    def get_latest(self):
+        """Return the latest result tuple or *None* if nothing new."""
+        with self._lock:
+            result = self._latest_result
+            self._latest_result = None  # mark consumed
+            return result
+
+    def get_processing_fps(self):
+        return self._proc_fps
+
+    def pause(self):
+        """Pause the processing loop (blocks until current frame finishes)."""
+        self._paused.clear()
+
+    def resume(self):
+        """Resume the processing loop."""
+        self._paused.set()
+
+    def stop(self):
+        """Signal the thread to exit and wait for it."""
+        self._running = False
+        self._paused.set()  # unblock if paused
+        self.join(timeout=5)
 
 
 # =============================================================================
@@ -262,12 +393,19 @@ class StereoHandTrackerGUI(QMainWindow):
         self.apply_kalman = True
         self.show_raw_video = True
         self.show_3d_view = False
+        self.show_3d_top = False
+        self.show_3d_front = False
+        self.show_3d_side = False
+        self.show_3d_iso = True
         self.frame_count = 0
         self.max_hands = MAX_HANDS
         self.show_raw_filtered_overlay = False
         # Multi-camera tracker
         self.tracker = None
+        self._proc_thread: ProcessingThread | None = None
         self.num_cameras = 0
+        self._display_fps = 0.0
+        self._display_t_prev = time.perf_counter()
         # Per-camera exposure (default 10 each, max 6 cameras)
         self.default_exposure = 10
         self.exposure_spinboxes: list[QSpinBox] = []
@@ -344,69 +482,99 @@ class StereoHandTrackerGUI(QMainWindow):
         main_layout.addWidget(video_widget, stretch=2)
         # 3D Visualization Widget (hidden by default)
         self.vis_3d_label = QLabel()
-        self.vis_3d_label.setMinimumSize(600, 600)
+        self.vis_3d_label.setMinimumSize(350, 350)
         self.vis_3d_label.setStyleSheet(
-            "background-color: #000; border: 2px solid #555;"
+            "background-color: #000; border: 1px solid #555;"
         )
         self.vis_3d_label.setAlignment(Qt.AlignCenter)
         self.vis_3d_label.hide()
-        main_layout.addWidget(self.vis_3d_label, stretch=4)
+        main_layout.addWidget(self.vis_3d_label, stretch=3)
         # Control panel (right side)
         control_panel = self.create_control_panel()
         scroll_area = QScrollArea()
         scroll_area.setWidget(control_panel)
         scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumWidth(260)
         scroll_area.setStyleSheet(
             "QScrollArea { border: none; background-color: #2d2d2d; }"
         )
-        main_layout.addWidget(scroll_area, stretch=1)
+        main_layout.addWidget(scroll_area, stretch=2)
 
     def create_control_panel(self):
         """Create the right-side control panel."""
         panel = QFrame()
         panel.setStyleSheet("""
-            QFrame { background-color: #2d2d2d; border-radius: 8px; }
-            QLabel { color: #ffffff; font-size: 12px; }
+            QFrame { background-color: #2d2d2d; border-radius: 6px; }
+            QLabel { color: #ffffff; font-size: 11px; }
             QGroupBox {
                 color: #ffffff;
                 font-weight: bold;
+                font-size: 11px;
                 border: 1px solid #444;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 4px;
+                margin-top: 6px;
+                padding-top: 8px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+                left: 8px;
+                padding: 0 3px;
             }
             QPushButton {
                 background-color: #0078d4;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 5px 10px;
+                border-radius: 3px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #1084d8; }
             QPushButton:pressed { background-color: #006abc; }
             QPushButton:disabled { background-color: #555; color: #888; }
-            QCheckBox { color: #ffffff; }
+            QCheckBox { color: #ffffff; font-size: 11px; }
             QSpinBox, QDoubleSpinBox {
                 background-color: #3d3d3d;
                 color: #ffffff;
                 border: 1px solid #555;
-                padding: 5px;
+                padding: 2px;
+                font-size: 11px;
             }
         """)
         layout = QVBoxLayout(panel)
-        layout.setSpacing(15)
-        layout.setContentsMargins(15, 15, 15, 15)
-        # Title
-        title = QLabel("Control Panel")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #0078d4;")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 8, 8, 8)
+        # ---- Tracking Control + FPS (top for quick access) ----
+        control_group = QGroupBox("Tracking")
+        control_layout = QVBoxLayout(control_group)
+        control_layout.setSpacing(3)
+        self.start_btn = QPushButton("Start Tracking")
+        self.start_btn.clicked.connect(self.toggle_tracking)
+        control_layout.addWidget(self.start_btn)
+        self.status_label = QLabel("Status: Stopped")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        control_layout.addWidget(self.status_label)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(4)
+        self.frame_label = QLabel("Frames: 0")
+        self.frame_label.setStyleSheet("font-size: 10px; color: #aaa;")
+        self.hands_label = QLabel("Hands: 0")
+        self.hands_label.setStyleSheet("font-size: 10px; color: #aaa;")
+        self.tracked_hand_label = QLabel("Hand: N/A")
+        self.tracked_hand_label.setStyleSheet("font-size: 10px; color: #aaa;")
+        status_row.addWidget(self.frame_label)
+        status_row.addWidget(self.hands_label)
+        status_row.addWidget(self.tracked_hand_label)
+        control_layout.addLayout(status_row)
+        self.fps_label = QLabel("FPS: 0.0")
+        self.fps_label.setStyleSheet("color: #00ff00; font-weight: bold; font-size: 11px;")
+        self.fps_label.setAlignment(Qt.AlignCenter)
+        control_layout.addWidget(self.fps_label)
+        self.timing_label = QLabel("Capture: 0ms | Detect: 0ms | Tri: 0ms")
+        self.timing_label.setStyleSheet("color: #aaa; font-size: 9px;")
+        self.timing_label.setAlignment(Qt.AlignCenter)
+        control_layout.addWidget(self.timing_label)
+        layout.addWidget(control_group)
         # ---- Camera Setup group ----
         camera_group = QGroupBox("Camera Setup")
         camera_layout = QVBoxLayout(camera_group)
@@ -480,6 +648,7 @@ class StereoHandTrackerGUI(QMainWindow):
         self.occlusion_spin.setSingleStep(5.0)
         # We'll set the value later when tracker is initialized, or use config default
         from config import MAX_REPROJECTION_ERROR
+
         self.occlusion_spin.setValue(MAX_REPROJECTION_ERROR)
         self.occlusion_spin.valueChanged.connect(self.on_occlusion_changed)
         mp_layout.addWidget(self.occlusion_spin, 2, 1)
@@ -498,59 +667,84 @@ class StereoHandTrackerGUI(QMainWindow):
         self.show_3d_checkbox.setChecked(False)
         self.show_3d_checkbox.toggled.connect(self.on_show_3d_toggled)
         processing_layout.addWidget(self.show_3d_checkbox)
+
+        # ---- 3D View Toggles ----
+        views_3d_group = QGroupBox("3D Views")
+        views_3d_layout = QHBoxLayout(views_3d_group)
+        views_3d_layout.setContentsMargins(4, 4, 4, 4)
+
+        self.cb_3d_top = QCheckBox("Top")
+        self.cb_3d_top.setChecked(self.show_3d_top)
+        self.cb_3d_top.toggled.connect(lambda c: setattr(self, "show_3d_top", c))
+        views_3d_layout.addWidget(self.cb_3d_top)
+
+        self.cb_3d_front = QCheckBox("Front")
+        self.cb_3d_front.setChecked(self.show_3d_front)
+        self.cb_3d_front.toggled.connect(lambda c: setattr(self, "show_3d_front", c))
+        views_3d_layout.addWidget(self.cb_3d_front)
+
+        self.cb_3d_side = QCheckBox("Side")
+        self.cb_3d_side.setChecked(self.show_3d_side)
+        self.cb_3d_side.toggled.connect(lambda c: setattr(self, "show_3d_side", c))
+        views_3d_layout.addWidget(self.cb_3d_side)
+
+        self.cb_3d_iso = QCheckBox("Iso")
+        self.cb_3d_iso.setChecked(self.show_3d_iso)
+        self.cb_3d_iso.toggled.connect(lambda c: setattr(self, "show_3d_iso", c))
+        views_3d_layout.addWidget(self.cb_3d_iso)
+
+        processing_layout.addWidget(views_3d_group)
         layout.addWidget(processing_group)
         # ---- Smoothing / Jitter ----
         smooth_group = QGroupBox("Smoothing")
         smooth_layout = QVBoxLayout(smooth_group)
-        row_3d_p = QHBoxLayout()
-        row_3d_p.addWidget(QLabel("3D Process"))
+        smooth_layout.setSpacing(3)
+        kalman_grid = QGridLayout()
+        kalman_grid.setSpacing(2)
+        kalman_grid.addWidget(QLabel("3D Proc"), 0, 0)
         self.k3d_p = QDoubleSpinBox()
         self.k3d_p.setDecimals(6)
         self.k3d_p.setRange(1e-6, 1.0)
         self.k3d_p.setSingleStep(1e-4)
         self.k3d_p.setValue(self.kalman_3d_process_noise)
         self.k3d_p.valueChanged.connect(self.on_kalman_params_changed)
-        row_3d_p.addWidget(self.k3d_p)
-        smooth_layout.addLayout(row_3d_p)
-        row_3d_m = QHBoxLayout()
-        row_3d_m.addWidget(QLabel("3D Meas"))
+        kalman_grid.addWidget(self.k3d_p, 0, 1)
+        kalman_grid.addWidget(QLabel("3D Meas"), 0, 2)
         self.k3d_m = QDoubleSpinBox()
         self.k3d_m.setDecimals(6)
         self.k3d_m.setRange(1e-6, 1.0)
         self.k3d_m.setSingleStep(1e-4)
         self.k3d_m.setValue(self.kalman_3d_measurement_noise)
         self.k3d_m.valueChanged.connect(self.on_kalman_params_changed)
-        row_3d_m.addWidget(self.k3d_m)
-        smooth_layout.addLayout(row_3d_m)
-        row_1d_p = QHBoxLayout()
-        row_1d_p.addWidget(QLabel("Angle Proc"))
+        kalman_grid.addWidget(self.k3d_m, 0, 3)
+        kalman_grid.addWidget(QLabel("Ang Proc"), 1, 0)
         self.k1d_p = QDoubleSpinBox()
         self.k1d_p.setDecimals(6)
         self.k1d_p.setRange(1e-6, 10.0)
         self.k1d_p.setSingleStep(1e-3)
         self.k1d_p.setValue(self.kalman_1d_process_noise)
         self.k1d_p.valueChanged.connect(self.on_kalman_params_changed)
-        row_1d_p.addWidget(self.k1d_p)
-        smooth_layout.addLayout(row_1d_p)
-        row_1d_m = QHBoxLayout()
-        row_1d_m.addWidget(QLabel("Angle Meas"))
+        kalman_grid.addWidget(self.k1d_p, 1, 1)
+        kalman_grid.addWidget(QLabel("Ang Meas"), 1, 2)
         self.k1d_m = QDoubleSpinBox()
         self.k1d_m.setDecimals(6)
         self.k1d_m.setRange(1e-6, 100.0)
         self.k1d_m.setSingleStep(1e-2)
         self.k1d_m.setValue(self.kalman_1d_measurement_noise)
         self.k1d_m.valueChanged.connect(self.on_kalman_params_changed)
-        row_1d_m.addWidget(self.k1d_m)
-        smooth_layout.addLayout(row_1d_m)
-        self.jitter_label = QLabel("Jitter (raw/filtered): N/A")
+        kalman_grid.addWidget(self.k1d_m, 1, 3)
+        smooth_layout.addLayout(kalman_grid)
+        self.jitter_label = QLabel("Jitter: N/A")
+        self.jitter_label.setStyleSheet("font-size: 10px; color: #aaa;")
         smooth_layout.addWidget(self.jitter_label)
-        self.overlay_checkbox = QCheckBox("Overlay raw vs filtered (3D)")
+        self.overlay_checkbox = QCheckBox("Overlay raw vs filtered")
         self.overlay_checkbox.toggled.connect(self.on_overlay_toggled)
         smooth_layout.addWidget(self.overlay_checkbox)
         btn_row = QHBoxLayout()
-        self.kalman_reset_btn = QPushButton("Reset Defaults")
+        btn_row.setSpacing(4)
+        self.kalman_reset_btn = QPushButton("Reset")
         self.kalman_reset_btn.clicked.connect(self.on_kalman_reset)
-        self.kalman_save_btn = QPushButton("Save to config.py")
+        self.kalman_save_btn = QPushButton("Save")
         self.kalman_save_btn.clicked.connect(self.on_kalman_save)
         btn_row.addWidget(self.kalman_reset_btn)
         btn_row.addWidget(self.kalman_save_btn)
@@ -592,37 +786,6 @@ class StereoHandTrackerGUI(QMainWindow):
         self.udp_status.setStyleSheet("color: #888;")
         udp_layout.addWidget(self.udp_status)
         layout.addWidget(udp_group)
-        # ---- FPS Monitoring ----
-        fps_group = QGroupBox("Performance Monitor")
-        fps_layout = QVBoxLayout(fps_group)
-        self.fps_label = QLabel("FPS: 0.0")
-        self.fps_label.setStyleSheet("color: #00ff00; font-weight: bold;")
-        self.fps_label.setAlignment(Qt.AlignCenter)
-        fps_layout.addWidget(self.fps_label)
-        self.timing_label = QLabel("Capture: 0ms | Detect: 0ms | Tri: 0ms")
-        self.timing_label.setStyleSheet("color: #aaa; font-size: 10px;")
-        self.timing_label.setAlignment(Qt.AlignCenter)
-        fps_layout.addWidget(self.timing_label)
-        layout.addWidget(fps_group)
-        # ---- Tracking Control ----
-        control_group = QGroupBox("Tracking Control")
-        control_layout = QVBoxLayout(control_group)
-        self.start_btn = QPushButton("Start Tracking")
-        self.start_btn.clicked.connect(self.toggle_tracking)
-        control_layout.addWidget(self.start_btn)
-        self.status_label = QLabel("Status: Stopped")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        control_layout.addWidget(self.status_label)
-        self.frame_label = QLabel("Frames: 0")
-        self.frame_label.setAlignment(Qt.AlignCenter)
-        control_layout.addWidget(self.frame_label)
-        self.hands_label = QLabel("Hands: 0")
-        self.hands_label.setAlignment(Qt.AlignCenter)
-        control_layout.addWidget(self.hands_label)
-        self.tracked_hand_label = QLabel("Tracked Hand: N/A")
-        self.tracked_hand_label.setAlignment(Qt.AlignCenter)
-        control_layout.addWidget(self.tracked_hand_label)
-        layout.addWidget(control_group)
         # Instructions
         instructions = QLabel("Press ESC to quit")
         instructions.setStyleSheet("color: #666; font-size: 10px;")
@@ -702,9 +865,14 @@ class StereoHandTrackerGUI(QMainWindow):
 
     def on_mp_params_changed(self):
         if self.tracker:
+            # Pause the processing thread while we recreate MediaPipe detectors
+            if self._proc_thread is not None:
+                self._proc_thread.pause()
             self.tracker.update_mp_params(
                 self.min_det_spin.value(), self.min_track_spin.value()
             )
+            if self._proc_thread is not None:
+                self._proc_thread.resume()
 
     def on_occlusion_changed(self):
         if self.tracker:
@@ -1053,8 +1221,11 @@ class StereoHandTrackerGUI(QMainWindow):
             self.start_btn.setStyleSheet("background-color: #d43333;")
             self.status_label.setText("Status: Running")
             self.status_label.setStyleSheet("color: #44ff44;")
-            # Start timer — as fast as possible (1 ms)
-            self.timer.start(1)
+            # Start background processing thread
+            self._proc_thread = ProcessingThread(self.tracker)
+            self._proc_thread.start()
+            # Start GUI refresh timer (~60 Hz display rate)
+            self.timer.start(16)
         except Exception as e:
             self.status_label.setText(f"Status: Error - {str(e)}")
             print(f"Error starting tracker: {e}")
@@ -1062,6 +1233,10 @@ class StereoHandTrackerGUI(QMainWindow):
     def stop_tracking(self):
         """Stop tracking."""
         self.timer.stop()
+        # Stop the processing thread first
+        if self._proc_thread is not None:
+            self._proc_thread.stop()
+            self._proc_thread = None
         if self.tracker:
             self.tracker.cleanup()
             self.tracker = None
@@ -1075,14 +1250,20 @@ class StereoHandTrackerGUI(QMainWindow):
     # Main frame loop
     # ------------------------------------------------------------------ #
     def update_frame(self):
-        """Process and display frames from all cameras."""
-        if not self.tracker:
+        """Display the latest available result from the processing thread."""
+        if not self.tracker or self._proc_thread is None:
+            self.stop_tracking()
+            return
+        # Check if processing thread died unexpectedly
+        if not self._proc_thread.is_alive():
+            print("[GUI] Processing thread died — stopping.")
             self.stop_tracking()
             return
         try:
-            frames, triangulated_hands_data, all_results, valid_2d_landmarks = (
-                self.tracker.process_frame()
-            )
+            latest = self._proc_thread.get_latest()
+            if latest is None:
+                return  # No new frame yet — skip this timer tick
+            frames, triangulated_hands_data, all_results, valid_2d_landmarks = latest
             num_hands = len(triangulated_hands_data)
             handedness_labels = self._handedness_labels(all_results)
             frame_landmarks = []
@@ -1094,14 +1275,22 @@ class StereoHandTrackerGUI(QMainWindow):
 
             all_best_cams = set()
 
-            for hand_idx, (landmarks_3d, best_cams, valid_lms) in enumerate(
-                triangulated_hands_data
-            ):
+            for hand_idx, (
+                landmarks_3d,
+                best_cams,
+                valid_lms,
+                reproj_errs,
+                n_cams_per_lm,
+            ) in enumerate(triangulated_hands_data):
                 all_best_cams.update(best_cams)
                 if self.apply_kalman and hand_idx < len(self.kalman_filters):
                     filtered_landmarks = np.array(
                         [
-                            self.kalman_filters[hand_idx][i].update(landmarks_3d[i])
+                            self.kalman_filters[hand_idx][i].update(
+                                landmarks_3d[i],
+                                reprojection_error=reproj_errs[i],
+                                num_cameras=n_cams_per_lm[i],
+                            )
                             for i in range(len(landmarks_3d))
                         ]
                     )
@@ -1175,28 +1364,48 @@ class StereoHandTrackerGUI(QMainWindow):
                 if not self.show_raw_video:
                     display_frame[:] = 0
 
-                # Draw green border if this camera is one of the best cameras
-                if idx in all_best_cams:
-                    cv2.rectangle(
-                        display_frame,
-                        (0, 0),
-                        (display_frame.shape[1] - 1, display_frame.shape[0] - 1),
-                        (0, 255, 0),
-                        10,
-                    )
+                # If the camera is upside down, rotate the frame 180 degrees permanently
+                # so it looks right-side up in the GUI.
+                from config import UPSIDE_DOWN_CAMERAS
 
-                # Draw per-finger coloured skeleton
+                if idx in UPSIDE_DOWN_CAMERAS:
+                    display_frame = cv2.rotate(display_frame, cv2.ROTATE_180)
+
+                # Draw per-finger coloured skeleton on 2D camera view
                 if results and results.multi_hand_landmarks:
-                    for hand_idx_in_cam, hand_landmarks in enumerate(
-                        results.multi_hand_landmarks
-                    ):
-                        mp.solutions.drawing_utils.draw_landmarks(
-                            display_frame,
-                            hand_landmarks,
-                            mp.solutions.hands.HAND_CONNECTIONS,
-                            mp.solutions.drawing_utils.DrawingSpec(color=(255, 255, 255), thickness=2, circle_radius=4),
-                            mp.solutions.drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2)
-                        )
+                    # Finger colors (BGR) matching the 3D view
+                    _FINGER_COLORS_2D = {
+                        "thumb":  (0, 200, 255),   # Orange
+                        "index":  (0, 255, 100),   # Green
+                        "middle": (255, 200, 0),   # Cyan-blue
+                        "ring":   (255, 0, 150),   # Magenta
+                        "pinky":  (100, 100, 255), # Red-ish
+                        "palm":   (180, 180, 180), # Grey
+                    }
+                    _COLORED_CONNS_2D = [
+                        (0, 1, "thumb"), (1, 2, "thumb"), (2, 3, "thumb"), (3, 4, "thumb"),
+                        (0, 5, "index"), (5, 6, "index"), (6, 7, "index"), (7, 8, "index"),
+                        (5, 9, "palm"), (9, 13, "palm"), (13, 17, "palm"), (0, 17, "palm"),
+                        (9, 10, "middle"), (10, 11, "middle"), (11, 12, "middle"),
+                        (13, 14, "ring"), (14, 15, "ring"), (15, 16, "ring"),
+                        (17, 18, "pinky"), (18, 19, "pinky"), (19, 20, "pinky"),
+                    ]
+                    for hand_landmarks in results.multi_hand_landmarks:
+                        h_img, w_img = display_frame.shape[:2]
+                        lm = hand_landmarks.landmark
+                        pts = [(int(l.x * w_img), int(l.y * h_img)) for l in lm]
+                        for si, ei, finger in _COLORED_CONNS_2D:
+                            col = _FINGER_COLORS_2D[finger]
+                            cv2.line(display_frame, pts[si], pts[ei], col, 2)
+                        for finger, indices in [
+                            ("thumb", [1,2,3,4]), ("index", [5,6,7,8]),
+                            ("middle", [9,10,11,12]), ("ring", [13,14,15,16]),
+                            ("pinky", [17,18,19,20]), ("palm", [0]),
+                        ]:
+                            col = _FINGER_COLORS_2D[finger]
+                            for i in indices:
+                                cv2.circle(display_frame, pts[i], 3, col, -1)
+                                cv2.circle(display_frame, pts[i], 4, (255,255,255), 1)
                 cv2.putText(
                     display_frame,
                     f"Camera {idx}",
@@ -1254,19 +1463,31 @@ class StereoHandTrackerGUI(QMainWindow):
             self.frame_label.setText(f"Frames: {self.frame_count}")
             self.hands_label.setText(f"Hands: {num_hands}")
             self.tracked_hand_label.setText(f"Tracked Hand: {tracked_label}")
+            # --- FPS metrics (processing vs display) ---
+            now_d = time.perf_counter()
+            dt_d = now_d - self._display_t_prev
+            self._display_fps = 1.0 / dt_d if dt_d > 0 else 0.0
+            self._display_t_prev = now_d
+
             if self.tracker:
                 fps_stats = self.tracker.get_fps_stats()
-                fps = fps_stats.get("fps", 0)
+                proc_fps = (
+                    self._proc_thread.get_processing_fps()
+                    if self._proc_thread
+                    else 0.0
+                )
                 capture_ms = fps_stats.get("capture_ms", 0)
                 detection_ms = fps_stats.get("detection_ms", 0)
                 tri_ms = fps_stats.get("triangulation_ms", 0)
-                if fps > 25:
+                if proc_fps > 25:
                     fps_color = "#00ff00"
-                elif fps > 15:
+                elif proc_fps > 15:
                     fps_color = "#ffff00"
                 else:
                     fps_color = "#ff0000"
-                self.fps_label.setText(f"FPS: {fps:.1f}")
+                self.fps_label.setText(
+                    f"Proc: {proc_fps:.1f} | Draw: {self._display_fps:.1f} FPS"
+                )
                 self.fps_label.setStyleSheet(f"color: {fps_color}; font-weight: bold;")
                 self.timing_label.setText(
                     f"Capture: {capture_ms:.1f}ms | Detect: {detection_ms:.1f}ms | Tri: {tri_ms:.1f}ms"
@@ -1283,122 +1504,180 @@ class StereoHandTrackerGUI(QMainWindow):
     # 3D Visualization
     # ------------------------------------------------------------------ #
     def update_3d_view(self, raw_hands, filtered_hands):
-        """Render 3D visualization (Top, Front, Side views)."""
+        """Render 3D visualization (Top, Front, Side, Isometric views)."""
         w, h = 600, 600
-        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        canvas = np.full((h, w, 3), 40, dtype=np.uint8)
+
+        # Draw grid lines
+        grid_spacing = 50
+        for i in range(0, w, grid_spacing):
+            cv2.line(canvas, (i, 0), (i, h), (60, 60, 60), 1)
+        for i in range(0, h, grid_spacing):
+            cv2.line(canvas, (0, i), (w, i), (60, 60, 60), 1)
+
         half_w, half_h = w // 2, h // 2
-        cv2.line(canvas, (half_w, 0), (half_w, h), (50, 50, 50), 1)
-        cv2.line(canvas, (0, half_h), (w, half_h), (50, 50, 50), 1)
-        cv2.putText(
-            canvas,
-            "Top View (XZ)",
-            (10, 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (200, 200, 200),
-            1,
-        )
-        cv2.putText(
-            canvas,
-            "Front View (XY)",
-            (10, half_h + 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (200, 200, 200),
-            1,
-        )
-        cv2.putText(
-            canvas,
-            "Side View (ZY)",
-            (half_w + 10, half_h + 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (200, 200, 200),
-            1,
-        )
-        scale = 1.5
+        qw, qh = half_w, half_h  # quadrant size
+
+        # Draw quadrant dividers
+        cv2.line(canvas, (half_w, 0), (half_w, h), (100, 100, 100), 2)
+        cv2.line(canvas, (0, half_h), (w, half_h), (100, 100, 100), 2)
+
+        # Count how many views are enabled
+        active_views = []
+        if self.show_3d_top:
+            active_views.append("top")
+        if self.show_3d_front:
+            active_views.append("front")
+        if self.show_3d_side:
+            active_views.append("side")
+        if self.show_3d_iso:
+            active_views.append("iso")
+
+        if not active_views:
+            # Nothing enabled — show placeholder
+            cv2.putText(
+                canvas,
+                "Enable a 3D view",
+                (w // 2 - 100, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (120, 120, 120),
+                1,
+            )
+            rgb_frame = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+            h_c, w_c, ch = rgb_frame.shape
+            qt_image = QImage(rgb_frame.data, w_c, h_c, ch * w_c, QImage.Format_RGB888)
+            self.vis_3d_label.setPixmap(QPixmap.fromImage(qt_image))
+            return
+
+        # Compute layout: 1 view = full canvas, 2-4 views = 2x2 grid
+        n_views = len(active_views)
+        if n_views == 1:
+            # Single view uses the full canvas
+            view_rects = {active_views[0]: (0, 0, w, h)}
+        else:
+            # 2x2 grid
+            slots = [(0, 0), (half_w, 0), (0, half_h), (half_w, half_h)]
+            view_rects = {}
+            for i, vname in enumerate(active_views):
+                ox, oy = slots[i]
+                view_rects[vname] = (ox, oy, qw, qh)
+            # Draw dividers only if multi-view
+            if n_views > 1:
+                if n_views > 2:
+                    cv2.line(canvas, (0, half_h), (w, half_h), (100, 100, 100), 2)
+                cv2.line(canvas, (half_w, 0), (half_w, h), (100, 100, 100), 2)
+
+        view_labels = {
+            "top": "Top (XZ)",
+            "front": "Front (XY)",
+            "side": "Side (ZY)",
+            "iso": "Iso",
+        }
+        for vname, (ox, oy, vw, vh) in view_rects.items():
+            cv2.putText(
+                canvas,
+                view_labels[vname],
+                (ox + 10, oy + 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (200, 200, 200),
+                1,
+            )
+
+        # Isometric projection angles (30° standard isometric)
+        iso_angle = np.radians(30)
+        cos_a, sin_a = np.cos(iso_angle), np.sin(iso_angle)
+
         for idx, hand_landmarks in enumerate(filtered_hands):
             if hand_landmarks is None or len(hand_landmarks) == 0:
                 continue
-                
-            # Calculate centroid to keep the hand centered in the view quadrants
-            valid_points = [p for p in hand_landmarks if not np.all(p == 0)]
+
+            # Calculate centroid of valid points
+            valid_points = [p for p in hand_landmarks if np.linalg.norm(p) > 1e-3]
             if not valid_points:
                 continue
             centroid = np.mean(valid_points, axis=0)
 
-            connections = [
-                (0, 1),
-                (1, 2),
-                (2, 3),
-                (3, 4),
-                (0, 5),
-                (5, 6),
-                (6, 7),
-                (7, 8),
-                (0, 9),
-                (9, 10),
-                (10, 11),
-                (11, 12),
-                (0, 13),
-                (13, 14),
-                (14, 15),
-                (15, 16),
-                (0, 17),
-                (17, 18),
-                (18, 19),
-                (19, 20),
+            # Auto-scale: find max extent from centroid and fit into quadrant
+            max_extent = 0.0
+            for p in valid_points:
+                ext = np.max(np.abs(p - centroid))
+                if ext > max_extent:
+                    max_extent = ext
+            if max_extent < 1.0:
+                max_extent = 1.0
+            # Fit the hand into the view rect (zoom)
+            # Use the actual view rect width for scaling (full canvas if single view)
+            ref_size = list(view_rects.values())[0][2]
+            scale = (ref_size * 1.755) / max_extent
+
+            # Per-finger colored connections: (start, end, color_BGR)
+            THUMB_COLOR  = (0, 200, 255)   # Orange
+            INDEX_COLOR  = (0, 255, 100)   # Green
+            MIDDLE_COLOR = (255, 200, 0)   # Cyan-blue
+            RING_COLOR   = (255, 0, 150)   # Magenta
+            PINKY_COLOR  = (100, 100, 255) # Red-ish
+            PALM_COLOR   = (180, 180, 180) # Grey
+
+            colored_connections = [
+                # Thumb
+                (0, 1, THUMB_COLOR), (1, 2, THUMB_COLOR), (2, 3, THUMB_COLOR), (3, 4, THUMB_COLOR),
+                # Index
+                (0, 5, INDEX_COLOR), (5, 6, INDEX_COLOR), (6, 7, INDEX_COLOR), (7, 8, INDEX_COLOR),
+                # Palm base
+                (5, 9, PALM_COLOR), (9, 13, PALM_COLOR), (13, 17, PALM_COLOR), (0, 17, PALM_COLOR),
+                # Middle
+                (9, 10, MIDDLE_COLOR), (10, 11, MIDDLE_COLOR), (11, 12, MIDDLE_COLOR),
+                # Ring
+                (13, 14, RING_COLOR), (14, 15, RING_COLOR), (15, 16, RING_COLOR),
+                # Pinky
+                (17, 18, PINKY_COLOR), (18, 19, PINKY_COLOR), (19, 20, PINKY_COLOR),
             ]
 
-            def draw_skeleton(view_type, offset_x, offset_y, points, color):
-                for start_idx, end_idx in connections:
+            def project_point(p, view_type, cx, cy):
+                """Project a centered 3D point to 2D pixel coords within a view rect."""
+                x, y, z = -p[0], -p[1], p[2]  # Mirror X & Y so user sees their own hand
+                if view_type == "top":
+                    u = int(x * scale) + cx
+                    v = int(z * scale) + cy
+                elif view_type == "front":
+                    u = int(x * scale) + cx
+                    v = int(-y * scale) + cy
+                elif view_type == "side":
+                    u = int(z * scale) + cx
+                    v = int(-y * scale) + cy
+                elif view_type == "iso":
+                    u = int((x * cos_a - z * cos_a) * scale) + cx
+                    v = int((-y + x * sin_a + z * sin_a) * scale * 0.8) + cy
+                return u, v
+
+            def draw_skeleton(
+                view_type, rect_ox, rect_oy, rect_w, rect_h, points, override_color=None
+            ):
+                cx = rect_ox + rect_w // 2
+                cy = rect_oy + rect_h // 2
+                for start_idx, end_idx, seg_color in colored_connections:
                     p1 = points[start_idx]
                     p2 = points[end_idx]
-                    if np.all(p1 == 0) or np.all(p2 == 0):
+                    if np.linalg.norm(p1) < 1e-3 or np.linalg.norm(p2) < 1e-3:
                         continue
-                        
-                    # Center around the filtered hand's centroid
                     c_p1 = p1 - centroid
                     c_p2 = p2 - centroid
-                    
-                    if view_type == "top":
-                        u1, v1 = (
-                            int(c_p1[0] * scale) + offset_x + 150,
-                            int(c_p1[2] * scale) + offset_y + 150,
-                        )
-                        u2, v2 = (
-                            int(c_p2[0] * scale) + offset_x + 150,
-                            int(c_p2[2] * scale) + offset_y + 150,
-                        )
-                    elif view_type == "front":
-                        u1, v1 = (
-                            int(c_p1[0] * scale) + offset_x + 150,
-                            int(-c_p1[1] * scale) + offset_y + 150,
-                        )
-                        u2, v2 = (
-                            int(c_p2[0] * scale) + offset_x + 150,
-                            int(-c_p2[1] * scale) + offset_y + 150,
-                        )
-                    elif view_type == "side":
-                        u1, v1 = (
-                            int(c_p1[2] * scale) + offset_x + 150,
-                            int(-c_p1[1] * scale) + offset_y + 150,
-                        )
-                        u2, v2 = (
-                            int(c_p2[2] * scale) + offset_x + 150,
-                            int(-c_p2[1] * scale) + offset_y + 150,
-                        )
-                    cv2.line(canvas, (u1, v1), (u2, v2), color, 1)
-                    cv2.circle(canvas, (u1, v1), 2, color, -1)
+                    u1, v1 = project_point(c_p1, view_type, cx, cy)
+                    u2, v2 = project_point(c_p2, view_type, cx, cy)
+                    col = override_color if override_color else seg_color
+                    cv2.line(canvas, (u1, v1), (u2, v2), col, 1)
+                    cv2.circle(canvas, (u1, v1), 2, col, -1)
 
-            draw_skeleton("top", 0, 0, hand_landmarks, (0, 255, 0))
-            draw_skeleton("front", 0, half_h, hand_landmarks, (0, 255, 0))
-            draw_skeleton("side", half_w, half_h, hand_landmarks, (0, 255, 0))
+            for vname, (ox, oy, vw, vh) in view_rects.items():
+                draw_skeleton(vname, ox, oy, vw, vh, hand_landmarks)
+
             if self.show_raw_filtered_overlay and idx < len(raw_hands):
                 raw_points = raw_hands[idx]
-                draw_skeleton("top", 0, 0, raw_points, (120, 120, 120))
-                draw_skeleton("front", 0, half_h, raw_points, (120, 120, 120))
-                draw_skeleton("side", half_w, half_h, raw_points, (120, 120, 120))
+                for vname, (ox, oy, vw, vh) in view_rects.items():
+                    draw_skeleton(vname, ox, oy, vw, vh, raw_points, override_color=(120, 120, 120))
+
         rgb_frame = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
@@ -1416,6 +1695,23 @@ class StereoHandTrackerGUI(QMainWindow):
 # Main
 # =============================================================================
 def main():
+    # Lower process priority so we don't starve other applications
+    try:
+        import psutil
+        p = psutil.Process()
+        p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        print("[Priority] Set to BELOW_NORMAL")
+    except Exception:
+        try:
+            import ctypes
+            BELOW_NORMAL = 0x00004000
+            ctypes.windll.kernel32.SetPriorityClass(
+                ctypes.windll.kernel32.GetCurrentProcess(), BELOW_NORMAL
+            )
+            print("[Priority] Set to BELOW_NORMAL (ctypes)")
+        except Exception:
+            pass  # Non-critical — just means we run at normal priority
+
     parser = argparse.ArgumentParser(description="Stereo Hand Tracker")
     args = parser.parse_args()
     app = QApplication(sys.argv)

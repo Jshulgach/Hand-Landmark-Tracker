@@ -109,8 +109,10 @@ class CameraWorker(threading.Thread):
                 with self.lock:
                     self.latest_frame = img_bgr
                 frame_obj.release()
-            else:
-                time.sleep(0.001)
+            # Always yield CPU — prevents starving other processes.
+            # ~2ms sleep still allows >200 FPS capture which far exceeds
+            # the ~30 FPS processing rate.
+            time.sleep(0.002)
 
 
 # ---------------------------------------------------------------------------

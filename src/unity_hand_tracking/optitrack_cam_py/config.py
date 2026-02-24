@@ -19,6 +19,11 @@ GRID_COLS = 3  # Grid layout for visualization
 # Primary camera index
 PRIMARY_CAMERA_INDEX = 0
 
+# Cameras that are physically mounted upside down (rotated 180 degrees).
+# Their images will be rotated before MediaPipe detection, and the resulting
+# 2D landmarks will be rotated back to match the calibration coordinate space.
+UPSIDE_DOWN_CAMERAS = [2, 3]
+
 # Camera resolution (will be set by actual hardware at runtime)
 CAMERA_WIDTH = None  # Populated at runtime from camera
 CAMERA_HEIGHT = None  # Populated at runtime from camera
@@ -29,18 +34,15 @@ CAMERA_IDS = None  # Populated at runtime
 
 # ==================== CALIBRATION SETTINGS ====================
 
-# Checkerboard pattern (inner corners)
-CHECKERBOARD_ROWS = 4  # Number of inner corners vertically
-CHECKERBOARD_COLS = 5  # Number of inner corners horizontally
-CHECKERBOARD_SQUARE_SIZE = 40  # Size of each square
-
-# ArUco marker settings (if board has markers)
-USE_ARUCO_BOARD = True
+# ChArUco Board Settings
+CHARUCO_SQUARES_X = 6  # Number of squares horizontally (width)
+CHARUCO_SQUARES_Y = 5  # Number of squares vertically (height)
+CHARUCO_SQUARE_LENGTH = 0.040  # Size of each square in meters (40mm)
+CHARUCO_MARKER_LENGTH = 0.030  # Size of each marker in meters (30mm)
 ARUCO_DICT = "DICT_5X5_250"  # ArUco dictionary type
-ARUCO_MARKER_SIZE = 30  # Marker size in mm
 
 # Calibration data paths
-CALIBRATION_DIR = "calibration_data"
+CALIBRATION_DIR = os.path.join(os.path.dirname(__file__), "calibration_data")
 CALIBRATION_FILE = os.path.join(CALIBRATION_DIR, "multi_camera_calib_latest.npz")
 
 # Number of calibration images to capture per camera
@@ -136,16 +138,19 @@ ANGLE_NAMES = [
 MIN_CAMERAS_FOR_TRIANGULATION = 2
 
 # Maximum reprojection error for valid triangulation (in pixels)
-# Used to detect occluded thumbs (if error > this, the thumb is dropped)
+# Used by RANSAC to classify inlier vs outlier cameras, and to detect
+# occluded thumbs (if error > this, the camera is dropped for that landmark)
 MAX_REPROJECTION_ERROR = 50.0
 
 # Method for combining multiple camera views
+# 'ransac' - RANSAC outlier rejection + N-view DLT (RECOMMENDED for 3+ cameras)
+# 'n_view_dlt' - Triangulate using all available cameras simultaneously (no outlier rejection)
 # 'simple_average' - Average all triangulated points
 # 'weighted_average' - Weight by detection confidence
 # 'reprojection' - Weight by reprojection confidence
 # 'weighted_error' - Find the best pair of cameras with lowest reprojection error
 # 'best_triplet' - Find the best 3 cameras using N-view DLT triangulation
-TRIANGULATION_METHOD = "best_triplet"
+TRIANGULATION_METHOD = "ransac"
 
 # ==================== COORDINATE SYSTEM ====================
 
