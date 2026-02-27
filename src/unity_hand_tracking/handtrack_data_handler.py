@@ -30,7 +30,7 @@ finger_starts = {"index": 2, "middle": 7, "ring": 12, "little": 17, "thumb": 22}
 #   middle_mcp, middle_pip, middle_dip
 #   ring_mcp, ring_pip, ring_dip
 #   pinky_mcp, pinky_pip, pinky_dip
-#   thumb_mcp, thumb_ip
+#   thumb_cmc_mcp, thumb_ip
 finger_angle_names = {
     "index": ["index_mcp", "index_pip", "index_dip"],
     "middle": ["middle_mcp", "middle_pip", "middle_dip"],
