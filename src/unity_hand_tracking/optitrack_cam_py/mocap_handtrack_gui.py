@@ -11,13 +11,22 @@ Multi-camera hand tracking application with:
 """
 
 import argparse
+import importlib
 import os
 import sys
 import time
-import threading
+
+# Preload MediaPipe before importing cv2/PyQt native stacks.
+# This minimizes Windows DLL initialization order conflicts.
+try:
+    importlib.import_module("mediapipe")
+    _MP_PRELOAD_OK = True
+    _MP_PRELOAD_ERROR = ""
+except Exception as _mp_exc:
+    _MP_PRELOAD_OK = False
+    _MP_PRELOAD_ERROR = str(_mp_exc)
 
 import cv2
-import mediapipe as mp
 import numpy as np
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QImage, QPalette, QPixmap
@@ -48,336 +57,89 @@ except Exception:
     local_clock = None
     HAS_LSL_CLOCK = False
 
-# Add parent directory to path for handtrack imports
-sys.path.insert(0, "../../src/")
-
-# Import configuration
-from config import (
-    ANGLE_NAMES,
-    KALMAN_1D_MEASUREMENT_NOISE,
-    KALMAN_1D_PROCESS_NOISE,
-    KALMAN_3D_MEASUREMENT_NOISE,
-    KALMAN_3D_PROCESS_NOISE,
-    MAX_HANDS,
-    MIN_DETECTION_CONFIDENCE,
-    MIN_TRACKING_CONFIDENCE,
-    NUM_LANDMARKS,
-    UDP_IP,
-    UDP_PORT_ANGLES,
-    UDP_PORT_LANDMARKS,
-)
-
-# Local tracker (uses CameraManager + threaded MediaPipe)
-from mocap_tracker import MultiCameraTracker
-
-# Broadcast helpers
-try:
+if __package__:
+    from ._processing_thread import ProcessingThread
+    from .broadcast import LSLBroadcaster, UDPBroadcaster
+    from .config import (
+        ANGLE_NAMES,
+        EMA_1D_ALPHA,
+        EMA_3D_ALPHA,
+        KALMAN_1D_MEASUREMENT_NOISE,
+        KALMAN_1D_PROCESS_NOISE,
+        KALMAN_3D_MEASUREMENT_NOISE,
+        KALMAN_3D_PROCESS_NOISE,
+        MAX_HANDS,
+        MAX_REPROJECTION_ERROR,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+        NUM_LANDMARKS,
+        SMOOTHING_METHOD,
+        UDP_IP,
+        UDP_PORT_ANGLES,
+        UDP_PORT_LANDMARKS,
+        UPSIDE_DOWN_CAMERAS,
+    )
+else:
+    from _processing_thread import ProcessingThread
     from broadcast import LSLBroadcaster, UDPBroadcaster
+    from config import (
+        ANGLE_NAMES,
+        EMA_1D_ALPHA,
+        EMA_3D_ALPHA,
+        KALMAN_1D_MEASUREMENT_NOISE,
+        KALMAN_1D_PROCESS_NOISE,
+        KALMAN_3D_MEASUREMENT_NOISE,
+        KALMAN_3D_PROCESS_NOISE,
+        MAX_HANDS,
+        MAX_REPROJECTION_ERROR,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+        NUM_LANDMARKS,
+        SMOOTHING_METHOD,
+        UDP_IP,
+        UDP_PORT_ANGLES,
+        UDP_PORT_LANDMARKS,
+        UPSIDE_DOWN_CAMERAS,
+    )
+
+try:
+    from handtrack.processing import (
+        build_smoother_factories,
+        finger_bend_angles,
+    )
 except ImportError:
-    print("Error: Could not import from broadcast module")
-    print("Make sure you're running from the correct directory")
-    sys.exit(1)
+    from pathlib import Path
+
+    _src_root = Path(__file__).resolve().parents[2]
+    if str(_src_root) not in sys.path:
+        sys.path.insert(0, str(_src_root))
+    from handtrack.processing import (
+        build_smoother_factories,
+        finger_bend_angles,
+    )
 
 
-# =============================================================================
-# Kalman Filters
-# =============================================================================
-class Kalman3D:
-    """3D Kalman filter with confidence-adaptive measurement noise.
+def _get_multi_camera_tracker_class():
+    if __package__:
+        from .mocap_tracker import MultiCameraTracker
+    else:
+        from mocap_tracker import MultiCameraTracker
+    return MultiCameraTracker
 
-    The measurement noise R is scaled dynamically based on:
-    - reprojection_error: higher error → less trust in measurement
-    - num_cameras: fewer cameras → less trust in measurement
 
-    Also includes:
-    - Temporal outlier rejection: measurements that jump too far are dampened
-    - Velocity damping: prevents jitter accumulation
+def _preload_mediapipe_runtime() -> tuple[bool, str]:
+    """Eagerly load MediaPipe native bindings before other native stacks.
+
+    This reduces Windows DLL initialization conflicts that can appear when
+    `_framework_bindings` is imported later in the session.
     """
-
-    # Maximum jump (mm) before a measurement is treated as a temporal outlier
-    MAX_JUMP_MM = 80.0
-    # Velocity damping factor applied each predict step (0.95 = slight damping)
-    VELOCITY_DAMPING = 0.95
-
-    def __init__(self, dt=1 / 30, process_noise=1e-3, measurement_noise=1e-2):
-        self.x = np.zeros((6, 1))  # [x, y, z, vx, vy, vz]
-        self.F = np.eye(6)
-        for i in range(3):
-            self.F[i, i + 3] = dt
-        self.H = np.hstack((np.eye(3), np.zeros((3, 3))))
-        self.P = np.eye(6)
-        self.Q = np.eye(6) * process_noise
-        self.R_base = measurement_noise  # Base measurement noise
-        self.R = np.eye(3) * measurement_noise
-        self._initialized = False
-        self._frames_lost = 0
-
-    def update(self, z, reprojection_error=0.0, num_cameras=2):
-        if z is None or (isinstance(z, np.ndarray) and np.linalg.norm(z) < 1e-3):
-            # Landmark lost — increment lost counter, damp velocity, return last known position
-            self._frames_lost += 1
-            if self._frames_lost > 5:
-                # Lost for too long — reset to zero so it isn't drawn
-                self.x[3:] = 0
-                return np.zeros(3)
-            # Damp velocity hard when lost
-            self.x[3:] *= 0.5
-            # Predict-only (coast)
-            self.x = self.F @ self.x
-            self.P = self.F @ self.P @ self.F.T + self.Q
-            return self.x[:3].flatten()
-
-        self._frames_lost = 0
-        z = np.reshape(z, (3, 1))
-
-        # If the filter hasn't been initialized yet, snap directly
-        if not self._initialized:
-            self.x[:3] = z
-            self.x[3:] = 0
-            self._initialized = True
-            return self.x[:3].flatten()
-
-        # ---- Adaptive measurement noise ----
-        # Scale R based on reprojection error and number of cameras
-        # More cameras + lower error = more trust (lower R)
-        error_scale = 1.0 + (reprojection_error / 10.0) ** 2  # quadratic penalty
-        camera_scale = 2.0 / max(num_cameras, 1)  # 2 cams = 1.0, 4 cams = 0.5
-        adaptive_noise = self.R_base * error_scale * camera_scale
-        self.R = np.eye(3) * adaptive_noise
-
-        # ---- Predict ----
-        # Apply velocity damping to prevent jitter accumulation
-        self.x[3:] *= self.VELOCITY_DAMPING
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
-
-        # ---- Temporal outlier rejection ----
-        predicted_pos = self.H @ self.x
-        jump = np.linalg.norm(z - predicted_pos)
-        if jump > self.MAX_JUMP_MM:
-            # Huge jump — likely a detection glitch. Heavily inflate R so the
-            # filter barely moves toward this suspect measurement.
-            outlier_scale = (jump / self.MAX_JUMP_MM) ** 2
-            self.R *= outlier_scale
-
-        # ---- Update ----
-        y = z - self.H @ self.x
-        S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x += K @ y
-        self.P = (np.eye(6) - K @ self.H) @ self.P
-
-        return self.x[:3].flatten()
-
-
-class Kalman1D:
-    """1D Kalman filter for angle smoothing."""
-
-    def __init__(self, dt=1 / 30, process_noise=0.1, measurement_noise=1.0):
-        self.x = np.zeros((2, 1))
-        self.F = np.array([[1, dt], [0, 1]])
-        self.H = np.array([[1, 0]])
-        self.P = np.eye(2)
-        self.Q = np.eye(2) * process_noise
-        self.R = np.array([[measurement_noise]])
-
-    def update(self, z):
-        z = np.array([[z]])
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
-        y = z - self.H @ self.x
-        S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x += K @ y
-        self.P = (np.eye(2) - K @ self.H) @ self.P
-        return self.x[0, 0]
-
-
-# =============================================================================
-# Processing Thread (Phase 4 — decoupled pipeline)
-# =============================================================================
-class ProcessingThread(threading.Thread):
-    """Background thread that runs capture → detect → triangulate continuously.
-
-    The GUI polls *get_latest()* at its own refresh rate so
-    processing throughput is decoupled from rendering.
-    """
-
-    def __init__(self, tracker):
-        super().__init__(daemon=True, name="ProcessingThread")
-        self.tracker = tracker
-        self._running = True
-        self._paused = threading.Event()   # set = running, clear = paused
-        self._paused.set()
-        self._lock = threading.Lock()
-        self._latest_result = None
-        # Processing FPS tracking
-        self._proc_fps = 0.0
-        self._t_prev = time.perf_counter()
-
-    # -- main loop ----------------------------------------------------------
-    def run(self):
-        while self._running:
-            # Honor pause requests (used when updating MediaPipe params)
-            self._paused.wait()
-            if not self._running:
-                break
-            try:
-                result = self.tracker.process_frame()
-                with self._lock:
-                    self._latest_result = result
-                # Track processing FPS
-                now = time.perf_counter()
-                dt = now - self._t_prev
-                self._proc_fps = 1.0 / dt if dt > 0 else 0.0
-                self._t_prev = now
-                # Yield CPU so we don't starve other processes
-                time.sleep(0.001)
-            except Exception as e:
-                print(f"[ProcessingThread] Error: {e}")
-                self._running = False
-                break
-
-    # -- public API (call from GUI thread) ----------------------------------
-    def get_latest(self):
-        """Return the latest result tuple or *None* if nothing new."""
-        with self._lock:
-            result = self._latest_result
-            self._latest_result = None  # mark consumed
-            return result
-
-    def get_processing_fps(self):
-        return self._proc_fps
-
-    def pause(self):
-        """Pause the processing loop (blocks until current frame finishes)."""
-        self._paused.clear()
-
-    def resume(self):
-        """Resume the processing loop."""
-        self._paused.set()
-
-    def stop(self):
-        """Signal the thread to exit and wait for it."""
-        self._running = False
-        self._paused.set()  # unblock if paused
-        self.join(timeout=5)
-
-
-# =============================================================================
-# Joint-angle helpers
-# =============================================================================
-def angle_between(v1, v2):
-    """Return angle in degrees between vectors v1 and v2."""
-    v1_norm = np.linalg.norm(v1)
-    v2_norm = np.linalg.norm(v2)
-    if v1_norm < 1e-8 or v2_norm < 1e-8:
-        return 0.0
-    v1 = v1 / v1_norm
-    v2 = v2 / v2_norm
-    dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
-    return np.degrees(np.arccos(dot))
-
-
-def finger_bend_angles(landmarks):
-    """
-    Calculate finger bend angles from 3D landmarks.
-    landmarks: (21, 3) numpy array
-    returns: dict of bending angles (degrees)
-    """
-
-    def joint_angle(a, b, c):
-        v1 = a - b
-        v2 = c - b
-        ang = angle_between(v1, v2)
-        bend = 180.0 - ang
-        return np.clip(bend, 0.0, 180.0)
-
-    angles = {}
-    fingers = {
-        "index": [5, 6, 7, 8],
-        "middle": [9, 10, 11, 12],
-        "ring": [13, 14, 15, 16],
-        "pinky": [17, 18, 19, 20],
-    }
-    wrist = landmarks[0]
-    for name, (mcp, pip, dip, tip) in fingers.items():
-        angles[f"{name}_mcp"] = joint_angle(wrist, landmarks[mcp], landmarks[pip])
-        angles[f"{name}_pip"] = joint_angle(
-            landmarks[mcp], landmarks[pip], landmarks[dip]
-        )
-        angles[f"{name}_dip"] = joint_angle(
-            landmarks[pip], landmarks[dip], landmarks[tip]
-        )
-    # Thumb landmarks: 0(wrist) -> 1(CMC) -> 2(MCP) -> 3(IP) -> 4(tip)
-    # Two distal bend angles matching Unity's Proximal and Distal joints
-    # Use key name that matches broadcast.py: thumb_cmc_mcp
-    angles["thumb_cmc_mcp"] = joint_angle(landmarks[1], landmarks[2], landmarks[3])
-    angles["thumb_ip"] = joint_angle(landmarks[2], landmarks[3], landmarks[4])
-    return angles
-
-
-def finger_splay_angles(landmarks):
-    """
-    Calculate finger splay angles from 3D landmarks.
-    Simple approach: signed angle between wrist->TIP and wrist->middle_TIP reference.
-    landmarks: (21, 3) numpy array
-    returns: dict of splay angles (degrees) for each finger's MCP
-    """
-    wrist = landmarks[0]
-
-    # Reference: wrist -> middle TIP
-    ref = landmarks[12] - wrist
-    ref_norm = np.linalg.norm(ref)
-    if ref_norm < 1e-8:
-        return {}
-    ref = ref / ref_norm
-
-    # Rough palm normal for sign (cross of wrist->index_tip and wrist->pinky_tip)
-    v1 = landmarks[8] - wrist
-    v2 = landmarks[20] - wrist
-    palm_normal = np.cross(v1, v2)
-    norm = np.linalg.norm(palm_normal)
-    if norm < 1e-8:
-        return {}
-    palm_normal = palm_normal / norm
-
-    tips = {
-        "index": landmarks[8],
-        "middle": landmarks[12],
-        "ring": landmarks[16],
-        "pinky": landmarks[20],
-    }
-
-    # Unity rest offsets (what Unity expects at neutral)
-    rest_offsets = {
-        "index": 0.0,
-        "middle": 0.0,
-        "ring": 0.0,
-        "pinky": -15.383,
-    }
-
-    angles = {}
-    for name, tip in tips.items():
-        finger_vec = tip - wrist
-        finger_norm = np.linalg.norm(finger_vec)
-        if finger_norm < 1e-8:
-            angles[f"{name}_splay"] = rest_offsets[name]
-            continue
-        finger_vec = finger_vec / finger_norm
-
-        # Unsigned angle
-        dot = np.clip(np.dot(finger_vec, ref), -1.0, 1.0)
-        angle = np.degrees(np.arccos(dot))
-
-        # Sign: clockwise = negative, counterclockwise = positive
-        cross = np.cross(ref, finger_vec)
-        if np.dot(cross, palm_normal) < 0:
-            angle = -angle
-
-        angles[f"{name}_splay"] = angle + rest_offsets[name]
-
-    return angles
+    if _MP_PRELOAD_OK:
+        return True, ""
+    try:
+        importlib.import_module("mediapipe")
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 # =============================================================================
@@ -388,6 +150,11 @@ class StereoHandTrackerGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self._mediapipe_ready = _MP_PRELOAD_OK
+        self._mediapipe_error = _MP_PRELOAD_ERROR
+        if not self._mediapipe_ready:
+            # Retry once in case environment was adjusted between import and init.
+            self._mediapipe_ready, self._mediapipe_error = _preload_mediapipe_runtime()
         # Tracking state
         self.is_running = False
         self.apply_kalman = True
@@ -430,28 +197,14 @@ class StereoHandTrackerGUI(QMainWindow):
         self.kalman_3d_measurement_noise = KALMAN_3D_MEASUREMENT_NOISE
         self.kalman_1d_process_noise = KALMAN_1D_PROCESS_NOISE
         self.kalman_1d_measurement_noise = KALMAN_1D_MEASUREMENT_NOISE
-        # Initialize Kalman filters for landmarks (per hand)
-        self.kalman_filters = [
-            [
-                Kalman3D(
-                    process_noise=self.kalman_3d_process_noise,
-                    measurement_noise=self.kalman_3d_measurement_noise,
-                )
-                for _ in range(NUM_LANDMARKS)
-            ]
-            for _ in range(self.max_hands)
-        ]
-        # Initialize Kalman filters for angles (per hand)
-        self.angle_kalman_filters = [
-            {
-                name: Kalman1D(
-                    process_noise=self.kalman_1d_process_noise,
-                    measurement_noise=self.kalman_1d_measurement_noise,
-                )
-                for name in ANGLE_NAMES
-            }
-            for _ in range(self.max_hands)
-        ]
+        self.smoothing_method = str(SMOOTHING_METHOD).strip().lower()
+        if self.smoothing_method not in ("kalman", "ema"):
+            self.smoothing_method = "kalman"
+        self.ema_3d_alpha = float(EMA_3D_ALPHA)
+        self.ema_1d_alpha = float(EMA_1D_ALPHA)
+        self.kalman_filters = []
+        self.angle_kalman_filters = []
+        self.reset_kalman_filters()
         # Jitter tracking
         self.prev_raw_landmarks = None
         self.prev_filtered_landmarks = None
@@ -462,6 +215,9 @@ class StereoHandTrackerGUI(QMainWindow):
         self.setup_timer()
         # Auto-start broadcasting after UI is initialized
         self.start_udp_broadcast()
+
+        if not self._mediapipe_ready:
+            print(f"[Startup] MediaPipe preload failed: {self._mediapipe_error}")
 
     # ------------------------------------------------------------------ #
     # UI
@@ -567,7 +323,9 @@ class StereoHandTrackerGUI(QMainWindow):
         status_row.addWidget(self.tracked_hand_label)
         control_layout.addLayout(status_row)
         self.fps_label = QLabel("FPS: 0.0")
-        self.fps_label.setStyleSheet("color: #00ff00; font-weight: bold; font-size: 11px;")
+        self.fps_label.setStyleSheet(
+            "color: #00ff00; font-weight: bold; font-size: 11px;"
+        )
         self.fps_label.setAlignment(Qt.AlignCenter)
         control_layout.addWidget(self.fps_label)
         self.timing_label = QLabel("Capture: 0ms | Detect: 0ms | Tri: 0ms")
@@ -646,16 +404,13 @@ class StereoHandTrackerGUI(QMainWindow):
         self.occlusion_spin = QDoubleSpinBox()
         self.occlusion_spin.setRange(5.0, 200.0)
         self.occlusion_spin.setSingleStep(5.0)
-        # We'll set the value later when tracker is initialized, or use config default
-        from config import MAX_REPROJECTION_ERROR
-
         self.occlusion_spin.setValue(MAX_REPROJECTION_ERROR)
         self.occlusion_spin.valueChanged.connect(self.on_occlusion_changed)
         mp_layout.addWidget(self.occlusion_spin, 2, 1)
 
         processing_layout.addLayout(mp_layout)
 
-        self.kalman_checkbox = QCheckBox("Enable Kalman Filter Smoothing")
+        self.kalman_checkbox = QCheckBox("Enable Smoothing")
         self.kalman_checkbox.toggled.connect(self.on_kalman_toggled)
         self.kalman_checkbox.setChecked(True)
         processing_layout.addWidget(self.kalman_checkbox)
@@ -699,6 +454,20 @@ class StereoHandTrackerGUI(QMainWindow):
         smooth_group = QGroupBox("Smoothing")
         smooth_layout = QVBoxLayout(smooth_group)
         smooth_layout.setSpacing(3)
+
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel("Method"))
+        self.smooth_method_combo = QComboBox()
+        self.smooth_method_combo.addItem("Kalman (adaptive)", "kalman")
+        self.smooth_method_combo.addItem("EMA (low-latency)", "ema")
+        idx = self.smooth_method_combo.findData(self.smoothing_method)
+        self.smooth_method_combo.setCurrentIndex(max(idx, 0))
+        self.smooth_method_combo.currentIndexChanged.connect(
+            self.on_smoothing_method_changed
+        )
+        method_row.addWidget(self.smooth_method_combo)
+        smooth_layout.addLayout(method_row)
+
         kalman_grid = QGridLayout()
         kalman_grid.setSpacing(2)
         kalman_grid.addWidget(QLabel("3D Proc"), 0, 0)
@@ -734,6 +503,27 @@ class StereoHandTrackerGUI(QMainWindow):
         self.k1d_m.valueChanged.connect(self.on_kalman_params_changed)
         kalman_grid.addWidget(self.k1d_m, 1, 3)
         smooth_layout.addLayout(kalman_grid)
+
+        ema_grid = QGridLayout()
+        ema_grid.setSpacing(2)
+        ema_grid.addWidget(QLabel("EMA 3D α"), 0, 0)
+        self.ema3d_alpha_spin = QDoubleSpinBox()
+        self.ema3d_alpha_spin.setDecimals(3)
+        self.ema3d_alpha_spin.setRange(0.01, 1.0)
+        self.ema3d_alpha_spin.setSingleStep(0.01)
+        self.ema3d_alpha_spin.setValue(self.ema_3d_alpha)
+        self.ema3d_alpha_spin.valueChanged.connect(self.on_ema_params_changed)
+        ema_grid.addWidget(self.ema3d_alpha_spin, 0, 1)
+
+        ema_grid.addWidget(QLabel("EMA Ang α"), 0, 2)
+        self.ema1d_alpha_spin = QDoubleSpinBox()
+        self.ema1d_alpha_spin.setDecimals(3)
+        self.ema1d_alpha_spin.setRange(0.01, 1.0)
+        self.ema1d_alpha_spin.setSingleStep(0.01)
+        self.ema1d_alpha_spin.setValue(self.ema_1d_alpha)
+        self.ema1d_alpha_spin.valueChanged.connect(self.on_ema_params_changed)
+        ema_grid.addWidget(self.ema1d_alpha_spin, 0, 3)
+        smooth_layout.addLayout(ema_grid)
         self.jitter_label = QLabel("Jitter: N/A")
         self.jitter_label.setStyleSheet("font-size: 10px; color: #aaa;")
         smooth_layout.addWidget(self.jitter_label)
@@ -749,6 +539,7 @@ class StereoHandTrackerGUI(QMainWindow):
         btn_row.addWidget(self.kalman_reset_btn)
         btn_row.addWidget(self.kalman_save_btn)
         smooth_layout.addLayout(btn_row)
+        self._set_smoothing_ui_state()
         layout.addWidget(smooth_group)
         # ---- UDP Broadcasting ----
         udp_group = QGroupBox("UDP Broadcasting")
@@ -829,6 +620,21 @@ class StereoHandTrackerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     # Callbacks
     # ------------------------------------------------------------------ #
+    def _set_smoothing_ui_state(self):
+        is_kalman = self.smoothing_method == "kalman"
+        for widget in (self.k3d_p, self.k3d_m, self.k1d_p, self.k1d_m):
+            widget.setEnabled(is_kalman)
+        for widget in (self.ema3d_alpha_spin, self.ema1d_alpha_spin):
+            widget.setEnabled(not is_kalman)
+
+    def on_smoothing_method_changed(self, _index):
+        self.smoothing_method = self.smooth_method_combo.currentData()
+        if self.smoothing_method not in ("kalman", "ema"):
+            self.smoothing_method = "kalman"
+        self._set_smoothing_ui_state()
+        if self.apply_kalman:
+            self.reset_kalman_filters()
+
     def on_kalman_toggled(self, checked):
         self.apply_kalman = checked
         if checked:
@@ -886,11 +692,19 @@ class StereoHandTrackerGUI(QMainWindow):
         if self.apply_kalman:
             self.reset_kalman_filters()
 
+    def on_ema_params_changed(self):
+        self.ema_3d_alpha = float(self.ema3d_alpha_spin.value())
+        self.ema_1d_alpha = float(self.ema1d_alpha_spin.value())
+        if self.apply_kalman and self.smoothing_method == "ema":
+            self.reset_kalman_filters()
+
     def on_kalman_reset(self):
         self.k3d_p.setValue(KALMAN_3D_PROCESS_NOISE)
         self.k3d_m.setValue(KALMAN_3D_MEASUREMENT_NOISE)
         self.k1d_p.setValue(KALMAN_1D_PROCESS_NOISE)
         self.k1d_m.setValue(KALMAN_1D_MEASUREMENT_NOISE)
+        self.ema3d_alpha_spin.setValue(EMA_3D_ALPHA)
+        self.ema1d_alpha_spin.setValue(EMA_1D_ALPHA)
         self.on_kalman_params_changed()
 
     def on_kalman_save(self):
@@ -912,32 +726,33 @@ class StereoHandTrackerGUI(QMainWindow):
             replace_value(
                 "KALMAN_1D_MEASUREMENT_NOISE", self.kalman_1d_measurement_noise
             )
+            replace_value("SMOOTHING_METHOD", f'"{self.smoothing_method}"')
+            replace_value("EMA_3D_ALPHA", self.ema_3d_alpha)
+            replace_value("EMA_1D_ALPHA", self.ema_1d_alpha)
             with open(config_path, "w", encoding="utf-8") as f:
                 f.writelines(lines)
-            self.status_label.setText("Status: Saved Kalman params")
+            self.status_label.setText("Status: Saved smoothing params")
         except Exception as exc:
             self.status_label.setText(f"Status: Save failed - {exc}")
 
     def reset_kalman_filters(self):
-        """Reset all Kalman filters."""
+        """Reset smoothing filters for landmarks and angles."""
+        landmark_factory, angle_factory = build_smoother_factories(
+            method=self.smoothing_method,
+            kalman_3d_process_noise=self.kalman_3d_process_noise,
+            kalman_3d_measurement_noise=self.kalman_3d_measurement_noise,
+            kalman_1d_process_noise=self.kalman_1d_process_noise,
+            kalman_1d_measurement_noise=self.kalman_1d_measurement_noise,
+            ema_3d_alpha=self.ema_3d_alpha,
+            ema_1d_alpha=self.ema_1d_alpha,
+        )
+
         self.kalman_filters = [
-            [
-                Kalman3D(
-                    process_noise=self.kalman_3d_process_noise,
-                    measurement_noise=self.kalman_3d_measurement_noise,
-                )
-                for _ in range(NUM_LANDMARKS)
-            ]
+            [landmark_factory() for _ in range(NUM_LANDMARKS)]
             for _ in range(self.max_hands)
         ]
         self.angle_kalman_filters = [
-            {
-                name: Kalman1D(
-                    process_noise=self.kalman_1d_process_noise,
-                    measurement_noise=self.kalman_1d_measurement_noise,
-                )
-                for name in ANGLE_NAMES
-            }
+            {name: angle_factory() for name in ANGLE_NAMES}
             for _ in range(self.max_hands)
         ]
 
@@ -1129,6 +944,22 @@ class StereoHandTrackerGUI(QMainWindow):
     def start_tracking(self):
         """Start multi-camera tracking."""
         try:
+            if not self._mediapipe_ready:
+                self._mediapipe_ready, self._mediapipe_error = (
+                    _preload_mediapipe_runtime()
+                )
+                if not self._mediapipe_ready:
+                    msg = (
+                        "MediaPipe preload failed. "
+                        "Try running from PowerShell/CMD (not MINGW/MSYS), "
+                        "and ensure VC++ Redistributable 2015-2022 is installed."
+                    )
+                    self.status_label.setText(f"Status: Error - {msg}")
+                    print(f"Error starting tracker: {msg}")
+                    print(f"MediaPipe preload detail: {self._mediapipe_error}")
+                    return
+
+            MultiCameraTracker = _get_multi_camera_tracker_class()
             self.tracker = MultiCameraTracker()
             self.tracker.max_reprojection_error = self.occlusion_spin.value()
             if not self.tracker.initialize_cameras(
@@ -1344,9 +1175,8 @@ class StereoHandTrackerGUI(QMainWindow):
                 if hand_idx == 0:
                     print(
                         f"\rFrame {self.frame_count} [3D Triangulated] - "
-                        f"Index MCP: {joint_angles['index_mcp']:.2f}\u00b0, "
-                        f"Index PIP: {joint_angles['index_pip']:.2f}\u00b0, "
-                        f"Index DIP: {joint_angles['index_dip']:.2f}\u00b0 | ",
+                        f"Thumb CMC-MCP: {joint_angles['thumb_cmc_mcp']:.2f}\u00b0, "
+                        f"Thumb IP: {joint_angles['thumb_ip']:.2f}\u00b0 | ",
                         end="",
                         flush=True,
                     )
@@ -1366,8 +1196,6 @@ class StereoHandTrackerGUI(QMainWindow):
 
                 # If the camera is upside down, rotate the frame 180 degrees permanently
                 # so it looks right-side up in the GUI.
-                from config import UPSIDE_DOWN_CAMERAS
-
                 if idx in UPSIDE_DOWN_CAMERAS:
                     display_frame = cv2.rotate(display_frame, cv2.ROTATE_180)
 
@@ -1375,37 +1203,58 @@ class StereoHandTrackerGUI(QMainWindow):
                 if results and results.multi_hand_landmarks:
                     # Finger colors (BGR) matching the 3D view
                     _FINGER_COLORS_2D = {
-                        "thumb":  (0, 200, 255),   # Orange
-                        "index":  (0, 255, 100),   # Green
-                        "middle": (255, 200, 0),   # Cyan-blue
-                        "ring":   (255, 0, 150),   # Magenta
-                        "pinky":  (100, 100, 255), # Red-ish
-                        "palm":   (180, 180, 180), # Grey
+                        "thumb": (0, 200, 255),  # Orange
+                        "index": (0, 255, 100),  # Green
+                        "middle": (255, 200, 0),  # Cyan-blue
+                        "ring": (255, 0, 150),  # Magenta
+                        "pinky": (100, 100, 255),  # Red-ish
+                        "palm": (180, 180, 180),  # Grey
                     }
                     _COLORED_CONNS_2D = [
-                        (0, 1, "thumb"), (1, 2, "thumb"), (2, 3, "thumb"), (3, 4, "thumb"),
-                        (0, 5, "index"), (5, 6, "index"), (6, 7, "index"), (7, 8, "index"),
-                        (5, 9, "palm"), (9, 13, "palm"), (13, 17, "palm"), (0, 17, "palm"),
-                        (9, 10, "middle"), (10, 11, "middle"), (11, 12, "middle"),
-                        (13, 14, "ring"), (14, 15, "ring"), (15, 16, "ring"),
-                        (17, 18, "pinky"), (18, 19, "pinky"), (19, 20, "pinky"),
+                        (0, 1, "thumb"),
+                        (1, 2, "thumb"),
+                        (2, 3, "thumb"),
+                        (3, 4, "thumb"),
+                        (0, 5, "index"),
+                        (5, 6, "index"),
+                        (6, 7, "index"),
+                        (7, 8, "index"),
+                        (5, 9, "palm"),
+                        (9, 13, "palm"),
+                        (13, 17, "palm"),
+                        (0, 17, "palm"),
+                        (9, 10, "middle"),
+                        (10, 11, "middle"),
+                        (11, 12, "middle"),
+                        (13, 14, "ring"),
+                        (14, 15, "ring"),
+                        (15, 16, "ring"),
+                        (17, 18, "pinky"),
+                        (18, 19, "pinky"),
+                        (19, 20, "pinky"),
                     ]
                     for hand_landmarks in results.multi_hand_landmarks:
                         h_img, w_img = display_frame.shape[:2]
                         lm = hand_landmarks.landmark
-                        pts = [(int(l.x * w_img), int(l.y * h_img)) for l in lm]
+                        pts = [
+                            (int(lm_point.x * w_img), int(lm_point.y * h_img))
+                            for lm_point in lm
+                        ]
                         for si, ei, finger in _COLORED_CONNS_2D:
                             col = _FINGER_COLORS_2D[finger]
                             cv2.line(display_frame, pts[si], pts[ei], col, 2)
                         for finger, indices in [
-                            ("thumb", [1,2,3,4]), ("index", [5,6,7,8]),
-                            ("middle", [9,10,11,12]), ("ring", [13,14,15,16]),
-                            ("pinky", [17,18,19,20]), ("palm", [0]),
+                            ("thumb", [1, 2, 3, 4]),
+                            ("index", [5, 6, 7, 8]),
+                            ("middle", [9, 10, 11, 12]),
+                            ("ring", [13, 14, 15, 16]),
+                            ("pinky", [17, 18, 19, 20]),
+                            ("palm", [0]),
                         ]:
                             col = _FINGER_COLORS_2D[finger]
                             for i in indices:
                                 cv2.circle(display_frame, pts[i], 3, col, -1)
-                                cv2.circle(display_frame, pts[i], 4, (255,255,255), 1)
+                                cv2.circle(display_frame, pts[i], 4, (255, 255, 255), 1)
                 cv2.putText(
                     display_frame,
                     f"Camera {idx}",
@@ -1472,9 +1321,7 @@ class StereoHandTrackerGUI(QMainWindow):
             if self.tracker:
                 fps_stats = self.tracker.get_fps_stats()
                 proc_fps = (
-                    self._proc_thread.get_processing_fps()
-                    if self._proc_thread
-                    else 0.0
+                    self._proc_thread.get_processing_fps() if self._proc_thread else 0.0
                 )
                 capture_ms = fps_stats.get("capture_ms", 0)
                 detection_ms = fps_stats.get("detection_ms", 0)
@@ -1613,26 +1460,41 @@ class StereoHandTrackerGUI(QMainWindow):
             scale = (ref_size * 1.755) / max_extent
 
             # Per-finger colored connections: (start, end, color_BGR)
-            THUMB_COLOR  = (0, 200, 255)   # Orange
-            INDEX_COLOR  = (0, 255, 100)   # Green
-            MIDDLE_COLOR = (255, 200, 0)   # Cyan-blue
-            RING_COLOR   = (255, 0, 150)   # Magenta
-            PINKY_COLOR  = (100, 100, 255) # Red-ish
-            PALM_COLOR   = (180, 180, 180) # Grey
+            THUMB_COLOR = (0, 200, 255)  # Orange
+            INDEX_COLOR = (0, 255, 100)  # Green
+            MIDDLE_COLOR = (255, 200, 0)  # Cyan-blue
+            RING_COLOR = (255, 0, 150)  # Magenta
+            PINKY_COLOR = (100, 100, 255)  # Red-ish
+            PALM_COLOR = (180, 180, 180)  # Grey
 
             colored_connections = [
                 # Thumb
-                (0, 1, THUMB_COLOR), (1, 2, THUMB_COLOR), (2, 3, THUMB_COLOR), (3, 4, THUMB_COLOR),
+                (0, 1, THUMB_COLOR),
+                (1, 2, THUMB_COLOR),
+                (2, 3, THUMB_COLOR),
+                (3, 4, THUMB_COLOR),
                 # Index
-                (0, 5, INDEX_COLOR), (5, 6, INDEX_COLOR), (6, 7, INDEX_COLOR), (7, 8, INDEX_COLOR),
+                (0, 5, INDEX_COLOR),
+                (5, 6, INDEX_COLOR),
+                (6, 7, INDEX_COLOR),
+                (7, 8, INDEX_COLOR),
                 # Palm base
-                (5, 9, PALM_COLOR), (9, 13, PALM_COLOR), (13, 17, PALM_COLOR), (0, 17, PALM_COLOR),
+                (5, 9, PALM_COLOR),
+                (9, 13, PALM_COLOR),
+                (13, 17, PALM_COLOR),
+                (0, 17, PALM_COLOR),
                 # Middle
-                (9, 10, MIDDLE_COLOR), (10, 11, MIDDLE_COLOR), (11, 12, MIDDLE_COLOR),
+                (9, 10, MIDDLE_COLOR),
+                (10, 11, MIDDLE_COLOR),
+                (11, 12, MIDDLE_COLOR),
                 # Ring
-                (13, 14, RING_COLOR), (14, 15, RING_COLOR), (15, 16, RING_COLOR),
+                (13, 14, RING_COLOR),
+                (14, 15, RING_COLOR),
+                (15, 16, RING_COLOR),
                 # Pinky
-                (17, 18, PINKY_COLOR), (18, 19, PINKY_COLOR), (19, 20, PINKY_COLOR),
+                (17, 18, PINKY_COLOR),
+                (18, 19, PINKY_COLOR),
+                (19, 20, PINKY_COLOR),
             ]
 
             def project_point(p, view_type, cx, cy):
@@ -1676,7 +1538,15 @@ class StereoHandTrackerGUI(QMainWindow):
             if self.show_raw_filtered_overlay and idx < len(raw_hands):
                 raw_points = raw_hands[idx]
                 for vname, (ox, oy, vw, vh) in view_rects.items():
-                    draw_skeleton(vname, ox, oy, vw, vh, raw_points, override_color=(120, 120, 120))
+                    draw_skeleton(
+                        vname,
+                        ox,
+                        oy,
+                        vw,
+                        vh,
+                        raw_points,
+                        override_color=(120, 120, 120),
+                    )
 
         rgb_frame = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
@@ -1698,12 +1568,14 @@ def main():
     # Lower process priority so we don't starve other applications
     try:
         import psutil
+
         p = psutil.Process()
         p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
         print("[Priority] Set to BELOW_NORMAL")
     except Exception:
         try:
             import ctypes
+
             BELOW_NORMAL = 0x00004000
             ctypes.windll.kernel32.SetPriorityClass(
                 ctypes.windll.kernel32.GetCurrentProcess(), BELOW_NORMAL
@@ -1713,7 +1585,7 @@ def main():
             pass  # Non-critical — just means we run at normal priority
 
     parser = argparse.ArgumentParser(description="Stereo Hand Tracker")
-    args = parser.parse_args()
+    parser.parse_args()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     palette = app.palette()

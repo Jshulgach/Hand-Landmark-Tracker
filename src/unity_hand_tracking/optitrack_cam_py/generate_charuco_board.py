@@ -13,14 +13,25 @@ Usage:
 import os
 
 import cv2
-from config import (
-    ARUCO_DICT,
-    CALIBRATION_DIR,
-    CHARUCO_MARKER_LENGTH,
-    CHARUCO_SQUARE_LENGTH,
-    CHARUCO_SQUARES_X,
-    CHARUCO_SQUARES_Y,
-)
+
+try:
+    from .config import (
+        ARUCO_DICT,
+        CALIBRATION_DIR,
+        CHARUCO_MARKER_LENGTH,
+        CHARUCO_SQUARE_LENGTH,
+        CHARUCO_SQUARES_X,
+        CHARUCO_SQUARES_Y,
+    )
+except ImportError:
+    from config import (
+        ARUCO_DICT,
+        CALIBRATION_DIR,
+        CHARUCO_MARKER_LENGTH,
+        CHARUCO_SQUARE_LENGTH,
+        CHARUCO_SQUARES_X,
+        CHARUCO_SQUARES_Y,
+    )
 
 
 def main():

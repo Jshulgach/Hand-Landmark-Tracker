@@ -21,20 +21,28 @@ Usage from another script:
     mgr.stop_all()
 """
 
-import sys
 import threading
 import time
 
 import cv2
 import numpy as np
 
-from config import (
-    CAMERA_EXPOSURE,
-    DISPLAY_SCALE,
-    GRID_COLS,
-    MJPEG_MODE,
-    optitrack_cam,
-)
+try:
+    from .config import (
+        CAMERA_EXPOSURE,
+        DISPLAY_SCALE,
+        GRID_COLS,
+        MJPEG_MODE,
+        optitrack_cam,
+    )
+except ImportError:
+    from config import (
+        CAMERA_EXPOSURE,
+        DISPLAY_SCALE,
+        GRID_COLS,
+        MJPEG_MODE,
+        optitrack_cam,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +134,13 @@ class CameraManager:
 
     def __init__(self, discovery_wait: float = 2.0):
         """Initialise the OptiTrack SDK and discover cameras."""
+        if optitrack_cam is None:
+            raise RuntimeError(
+                "optitrack_cam module not found. "
+                "Install/build the OptiTrack Python SDK and either place it in "
+                "unity_hand_tracking/optitrack_cam_py/Release or set "
+                "OPTITRACK_CAM_PY_PATH to its folder."
+            )
         print("Initializing OptiTrack SDK...")
         optitrack_cam.initialize_sdk()
         time.sleep(discovery_wait)
@@ -173,8 +188,12 @@ class CameraManager:
         """Return a list of BGR frames, one per camera (in index order)."""
         return [w.get_frame() for w in self.workers]
 
-    def get_grid(self, grid_cols: int = GRID_COLS, scale: float = DISPLAY_SCALE,
-                 overlay_labels: bool = True):
+    def get_grid(
+        self,
+        grid_cols: int = GRID_COLS,
+        scale: float = DISPLAY_SCALE,
+        overlay_labels: bool = True,
+    ):
         """
         Stitch all camera frames into a single grid image.
 
@@ -198,14 +217,19 @@ class CameraManager:
         if overlay_labels:
             for i, f in enumerate(frames):
                 cv2.putText(
-                    f, f"Camera #{i}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
+                    f,
+                    f"Camera #{i}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 0),
+                    2,
                 )
 
         # Build row-major grid, padding incomplete rows with black
         rows = []
         for start in range(0, len(frames), grid_cols):
-            row = frames[start: start + grid_cols]
+            row = frames[start : start + grid_cols]
             while len(row) < grid_cols:
                 row.append(np.zeros_like(frames[0]))
             rows.append(np.hstack(row))

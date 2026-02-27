@@ -18,15 +18,15 @@ import time
 
 import numpy as np
 
-# Add parent directory to path for handtrack imports
-sys.path.insert(0, "../../src/")
-
 try:
-    from broadcast import LSLBroadcaster, UDPBroadcaster
+    from .broadcast import LSLBroadcaster, UDPBroadcaster
 except ImportError:
-    print("Error: Could not import from handtrack.io.broadcast")
-    print("Make sure you're running from the correct directory")
-    sys.exit(1)
+    try:
+        from broadcast import LSLBroadcaster, UDPBroadcaster
+    except ImportError:
+        print("Error: Could not import broadcaster modules")
+        print("Install package with `pip install -e .` or run from module context")
+        sys.exit(1)
 
 
 class HandDataSimulator:

@@ -19,6 +19,41 @@ pip install opencv-python mediapipe PyQt5 numpy scipy
 
 ## Examples
 
+### OptiTrack Multi-Camera (Flagship)
+
+#### `optitrack_mocap_gui.py` ⭐ **Flagship Demo**
+**Stereo OptiTrack hand tracking GUI with 3D triangulation and streaming**
+
+```bash
+python optitrack_mocap_gui.py
+```
+
+#### `optitrack_calibration.py`
+**OptiTrack multi-camera ChArUco calibration launcher**
+
+```bash
+python optitrack_calibration.py
+```
+
+This wraps the package calibration implementation with the same dependency
+preflight and MINGW-safe child-process environment handling as the GUI launcher.
+
+**Why this is the showcase app:**
+- Multi-camera 3D triangulation workflow with calibration support
+- Real-time hand kinematics and smoothing in one GUI
+- UDP + LSL streaming output for downstream integrations
+- Designed for demos where robust 3D tracking matters most
+
+Legacy Unity-oriented scripts were moved to:
+
+- `examples/01_basic_tracking/unity_hand_tracking/mono/`
+- `examples/01_basic_tracking/unity_hand_tracking/stereo/`
+- `examples/01_basic_tracking/unity_hand_tracking/optitrack_tools/`
+
+Use these as reference tools; package entrypoints remain the recommended runtime path.
+
+---
+
 ### Hand Tracking
 
 #### 1. `handtrack_webcam.py`

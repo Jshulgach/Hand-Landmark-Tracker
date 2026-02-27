@@ -9,22 +9,29 @@ __license__ = "MIT"
 __url__ = "https://github.com/jshulgach/Hand-Landmark-Tracker"
 __description__ = "Python package for hand landmark tracking and kinematics suite"
 
-import importlib as _importlib
-
-submodules = [
-    # 'decomposition',
-    'applications',
-    'io',
-    #'plotting',
-    # 'control',
-    'tracker',
-    'processing',
-    #'rhx_interface',
-    #'samples',
-    # 'stream',
-    'calibration',
+__all__ = [
+    "MultiCameraTracker",
+    "MultiCameraCalibrator",
+    "UDPBroadcaster",
+    "LSLBroadcaster",
 ]
 
-from .tracker.stereo import MultiCameraTracker
-from .calibration import MultiCameraCalibrator
-from .io.broadcast import UDPBroadcaster, LSLBroadcaster
+
+def __getattr__(name):
+    if name == "MultiCameraTracker":
+        from .tracker.stereo import MultiCameraTracker
+
+        return MultiCameraTracker
+    if name == "MultiCameraCalibrator":
+        from .calibration import MultiCameraCalibrator
+
+        return MultiCameraCalibrator
+    if name == "UDPBroadcaster":
+        from .io.broadcast import UDPBroadcaster
+
+        return UDPBroadcaster
+    if name == "LSLBroadcaster":
+        from .io.broadcast import LSLBroadcaster
+
+        return LSLBroadcaster
+    raise AttributeError(f"module 'handtrack' has no attribute '{name}'")

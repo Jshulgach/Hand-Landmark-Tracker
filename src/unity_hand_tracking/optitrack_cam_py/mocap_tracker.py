@@ -8,23 +8,39 @@ Calibration is loaded from the .npz file produced by calibration.py.
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from config import (
-    CALIBRATION_FILE,
-    MAX_HANDS,
-    MAX_REPROJECTION_ERROR,
-    MIN_CAMERAS_FOR_TRIANGULATION,
-    MIN_DETECTION_CONFIDENCE,
-    MIN_TRACKING_CONFIDENCE,
-    MODEL_COMPLEXITY,
-    NUM_LANDMARKS,
-    TRIANGULATION_METHOD,
-    UPSIDE_DOWN_CAMERAS,
-)
-from multi_mjpeg import CameraManager
+
+try:
+    from .config import (
+        CALIBRATION_FILE,
+        MAX_HANDS,
+        MAX_REPROJECTION_ERROR,
+        MIN_CAMERAS_FOR_TRIANGULATION,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+        MODEL_COMPLEXITY,
+        NUM_LANDMARKS,
+        TRIANGULATION_METHOD,
+        UPSIDE_DOWN_CAMERAS,
+    )
+    from .multi_mjpeg import CameraManager
+except ImportError:
+    from config import (
+        CALIBRATION_FILE,
+        MAX_HANDS,
+        MAX_REPROJECTION_ERROR,
+        MIN_CAMERAS_FOR_TRIANGULATION,
+        MIN_DETECTION_CONFIDENCE,
+        MIN_TRACKING_CONFIDENCE,
+        MODEL_COMPLEXITY,
+        NUM_LANDMARKS,
+        TRIANGULATION_METHOD,
+        UPSIDE_DOWN_CAMERAS,
+    )
+    from multi_mjpeg import CameraManager
 
 
 class MultiCameraTracker:
@@ -40,7 +56,8 @@ class MultiCameraTracker:
         self.img_height = 0
 
         # MediaPipe Hands instances (one per camera — not thread-safe to share)
-        self.hands_detectors: list[mp.solutions.hands.Hands] = []
+        self.hands_detectors: list[Any] = []
+        self._mp_hands_cls = None
 
         # Calibration data
         self.camera_matrices = []
@@ -98,6 +115,25 @@ class MultiCameraTracker:
     # ------------------------------------------------------------------ #
     # Initialisation
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _load_mediapipe_hands_class():
+        """Import MediaPipe lazily so startup errors surface with actionable context."""
+        try:
+            import mediapipe as mp
+
+            return mp.solutions.hands.Hands
+        except Exception as exc:
+            msg = str(exc)
+            hint = ""
+            if "_framework_bindings" in msg:
+                hint = (
+                    "\nMediaPipe native DLL failed to load. "
+                    "On Windows, try launching from PowerShell/CMD (not MINGW/MSYS), "
+                    "ensure Microsoft Visual C++ Redistributable 2015-2022 is installed, "
+                    "and verify mediapipe is installed in this exact interpreter."
+                )
+            raise RuntimeError(f"Failed to import mediapipe: {msg}{hint}") from exc
+
     def initialize_cameras(
         self,
         min_det_conf=MIN_DETECTION_CONFIDENCE,
@@ -107,6 +143,12 @@ class MultiCameraTracker:
         Start CameraManager, create per-camera MediaPipe detectors,
         and spin up the thread pool.
         """
+        # Load MediaPipe before OptiTrack SDK initialization.
+        # Rationale: in some Windows shell/runtime combinations, loading the
+        # OptiTrack native stack first can cause MediaPipe's _framework_bindings
+        # DLL initialization to fail later in the same process.
+        self._mp_hands_cls = self._load_mediapipe_hands_class()
+
         # --- cameras via CameraManager ---
         self.cam_mgr = CameraManager()
         self.num_cameras = self.cam_mgr.num_cameras
@@ -135,7 +177,7 @@ class MultiCameraTracker:
         # --- MediaPipe (one instance per camera for thread safety) ---
         self.hands_detectors = []
         for _ in range(self.num_cameras):
-            hands = mp.solutions.hands.Hands(
+            hands = self._mp_hands_cls(
                 max_num_hands=MAX_HANDS,
                 model_complexity=MODEL_COMPLEXITY,
                 min_detection_confidence=min_det_conf,
@@ -157,12 +199,15 @@ class MultiCameraTracker:
         if not self.hands_detectors:
             return
 
+        if self._mp_hands_cls is None:
+            self._mp_hands_cls = self._load_mediapipe_hands_class()
+
         for hands in self.hands_detectors:
             hands.close()
         self.hands_detectors.clear()
 
         for _ in range(self.num_cameras):
-            hands = mp.solutions.hands.Hands(
+            hands = self._mp_hands_cls(
                 max_num_hands=MAX_HANDS,
                 model_complexity=MODEL_COMPLEXITY,
                 min_detection_confidence=min_det_conf,
@@ -327,12 +372,15 @@ class MultiCameraTracker:
     # ------------------------------------------------------------------ #
     def _reprojection_error(self, pt3d, points_2d, camera_indices):
         """Compute average reprojection error of a 3D point across cameras."""
+        # Convert Euclidean 3D point to homogeneous coordinates [X, Y, Z, 1].
         pt_h = np.append(pt3d, 1.0)
         total_error = 0.0
         for k in range(len(points_2d)):
             P = self.projection_matrices[camera_indices[k]]
+            # Project 3D -> image plane: x ~ P X, then de-homogenize to pixel coords.
             projected = P @ pt_h
             projected = projected[:2] / projected[2]
+            # Reprojection residual in pixels.
             total_error += np.linalg.norm(projected - points_2d[k])
         return total_error / len(points_2d)
 
@@ -342,6 +390,10 @@ class MultiCameraTracker:
         points_2d: list of (2,) arrays
         projection_matrices: list of (3, 4) projection matrices
         """
+        # DLT linear system for each camera i and point (u_i, v_i):
+        # (u_i * P_i[2,:] - P_i[0,:]) X = 0
+        # (v_i * P_i[2,:] - P_i[1,:]) X = 0
+        # Stack rows across all views and solve A X = 0 via SVD.
         A = []
         for pt, P in zip(points_2d, projection_matrices):
             u, v = pt[0], pt[1]
@@ -349,6 +401,7 @@ class MultiCameraTracker:
             A.append(v * P[2, :] - P[1, :])
         A = np.array(A)
         _, _, Vh = np.linalg.svd(A)
+        # Smallest singular vector is the homogeneous 3D solution.
         X = Vh[-1, :]
         return X[:3] / X[3]
 
@@ -363,6 +416,7 @@ class MultiCameraTracker:
             P = self.projection_matrices[camera_indices[k]]
             projected = P @ pt_h
             projected = projected[:2] / projected[2]
+            # Per-camera residual used by RANSAC inlier voting.
             err = np.linalg.norm(projected - points_2d[k])
             errors.append(err)
         return errors
@@ -385,6 +439,7 @@ class MultiCameraTracker:
 
         Returns (pt3d, inlier_cam_indices, error) or (None, [], inf).
         """
+        # This protects against bad 2D detections/occlusions from one or more views.
         n = len(points_2d)
         if n < 2:
             return None, [], float("inf")
@@ -478,12 +533,14 @@ class MultiCameraTracker:
             return self._ransac_triangulate(points_2d, camera_indices)
 
         if method == "n_view_dlt":
+            # Single global DLT estimate from all participating cameras.
             Ps = [self.projection_matrices[idx] for idx in camera_indices]
             pt3d = self._triangulate_n_views(points_2d, Ps)
             error = self._reprojection_error(pt3d, points_2d, camera_indices)
             return pt3d, camera_indices, error
 
         if method == "best_triplet":
+            # Evaluate all 3-camera subsets and keep the subset with lowest reprojection error.
             best_pt3d = None
             best_error = float("inf")
             best_cams = []
@@ -515,6 +572,7 @@ class MultiCameraTracker:
                 method = "weighted_error"
 
         if method == "weighted_error":
+            # Score each camera pair by reprojection error and keep the best pair only.
             best_pt3d = None
             best_error = float("inf")
             best_pair = []
@@ -561,6 +619,7 @@ class MultiCameraTracker:
                 return None, [], float("inf")
 
             # --- Weight by inverse reprojection error ---
+            # Better candidates (lower error) receive larger weights.
             weights = []
             avg_errors = []
             for pt3d in candidates:
@@ -596,6 +655,7 @@ class MultiCameraTracker:
                 tri_pts.append(pt3d.flatten())
 
             if camera_confidences is not None and method == "weighted_average":
+                # Confidence-weighted fusion of per-pair triangulation results.
                 weights = np.array(camera_confidences[1:], dtype=np.float64)
                 wsum = weights.sum()
                 if wsum > 0:
@@ -696,6 +756,7 @@ class MultiCameraTracker:
             )
 
             # Drop landmark if reprojection error is too high (likely occluded/guessed)
+            # This gate prevents unstable points from propagating into smoothing/angles.
             if pt3d is not None and error > self.max_reprojection_error:
                 pt3d = None
 

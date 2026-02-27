@@ -18,17 +18,31 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-from config import (
-    ARUCO_DICT,
-    CALIBRATION_DIR,
-    CALIBRATION_FILE,
-    CHARUCO_MARKER_LENGTH,
-    CHARUCO_SQUARE_LENGTH,
-    CHARUCO_SQUARES_X,
-    CHARUCO_SQUARES_Y,
-    NUM_CALIBRATION_IMAGES,
-)
-from multi_mjpeg import CameraManager
+
+try:
+    from .config import (
+        ARUCO_DICT,
+        CALIBRATION_DIR,
+        CALIBRATION_FILE,
+        CHARUCO_MARKER_LENGTH,
+        CHARUCO_SQUARE_LENGTH,
+        CHARUCO_SQUARES_X,
+        CHARUCO_SQUARES_Y,
+        NUM_CALIBRATION_IMAGES,
+    )
+    from .multi_mjpeg import CameraManager
+except ImportError:
+    from config import (
+        ARUCO_DICT,
+        CALIBRATION_DIR,
+        CALIBRATION_FILE,
+        CHARUCO_MARKER_LENGTH,
+        CHARUCO_SQUARE_LENGTH,
+        CHARUCO_SQUARES_X,
+        CHARUCO_SQUARES_Y,
+        NUM_CALIBRATION_IMAGES,
+    )
+    from multi_mjpeg import CameraManager
 
 # ---------------------------------------------------------------------------
 # Helpers

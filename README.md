@@ -34,84 +34,56 @@ This code uses the amazing features of Google's machine learning suite [MediaPip
    git clone https://github.com/Jshulgach/Hand-Landmark-Tracker/unity_tree.git
    cd Hand-Landmark-Tracker
    ~~~
-3. Install the required packages.
-    ~~~
-    pip install opencv-python
-    pip install pyqt5
-    pip install mediapipe==0.10.14 
-    ~~~
+3. Install the package (recommended for production-style usage).
+   ~~~
+   pip install -e .
+   ~~~
+
+  Optional (OptiTrack-focused extras):
+  ~~~
+  pip install -e .[optitrack]
+  ~~~
 
 
 ## Getting Started
 
-### Monocular Hand Tracking GUI
-The easiest way to get started is with the interactive GUI applications:
+### Flagship Demo (OptiTrack Multi-Camera GUI)
+
+Run the full OptiTrack GUI using the package entrypoint:
 
 ```bash
-# Hand tracking with GUI
-cd src/unity_hand_tracking/mono/
-python mono_handtrack_gui.py
+handtrack-optitrack-gui
 ```
-### Stereo Camera Hand Tracking GUI
+
+Related operational commands:
+
 ```bash
-# all files for stereo tracking can be found below
-cd src/unity_hand_tracking/stereo/
+handtrack-doctor --optitrack
+handtrack-optitrack-board
+handtrack-optitrack-calibrate
+handtrack-optitrack-cameras
+handtrack-optitrack-test-sender
 ```
-#### Configuration
 
-Edit `config.py` to set:
+### Production Architecture
 
-- `CAMERA_IDS`: List of camera indices (e.g., `[1, 2]`)
-- `CHECKERBOARD_ROWS/COLS`: Inner corners of calibration board so (9x11 would be 8x10 - [n-1,m-1])
-- `CHECKERBOARD_SQUARE_SIZE`: Square size in millimeters
-- `UDP_PORT_LANDMARKS`: Port for 3D landmark data (default: 5005)
-- `UDP_PORT_ANGLES`: Port for joint angle data (default: 5010)
+- `handtrack`: reusable core APIs (tracking primitives, calibration, processing, IO/broadcast)
+- `unity_hand_tracking.optitrack_cam_py`: flagship OptiTrack application layer and camera backend integration
+- `examples/`: scenario scripts, legacy demos, and utility tools
 
-<img src="docs/source/_static/calibration_example.jpeg" alt="Calibration example" width="400">
+This separation keeps demo velocity high while preserving a stable API surface for downstream tools.
 
-**Figure:** Example of a checkerboard that could be used.
+### Legacy Mono/Stereo Demos
 
-#### Calibration
+Legacy script-style demos were moved out of `src/` and are now located in:
 
-##### Step 1: Test Cameras
 ```bash
-python test_cameras.py
+examples/01_basic_tracking/unity_hand_tracking/mono/
+examples/01_basic_tracking/unity_hand_tracking/stereo/
 ```
-Verifies all cameras work at specified resolution. Press 'q' to quit, 's' to save test frames.
 
-##### Step 2: Calibrate Cameras
-```bash
-python calibration.py
-```
-Requirements:
-- Printed checkerboard pattern visible to all cameras
-- 20+ image pairs from different positions and angles
-- Press SPACE when all cameras show green borders
-- Press 'q' after minimum 10 captures to finish early
+These are kept for reference and backward-compatible experimentation, while active development focuses on the OptiTrack package entrypoints.
 
-Output: `calibration_data/multi_camera_calib_latest.npz`
-
-##### Step 3: Verify Calibration
-```bash
-python verify_calibration.py
-```
-Shows reprojection errors, camera positions, and baseline distances. Good calibration: reprojection error under 0.5 pixels.
-
-#### Running the Tracker
-```bash
-python stereo_handtrack_gui.py
-```
-##### GUI Controls
-
-- Start Tracking: Begin multi-camera hand detection
-- Enable Kalman Filter: Smooth 3D positions and angles
-- Enable UDP Broadcasting: Stream data to external applications
-
-##### Console Output
-Real-time index finger angles printed on same line:
-```
-Frame 123 [3D Triangulated] - Index MCP: 12.34°, Index PIP: 45.67°, Index DIP: 23.89°
-```
 #### UDP Data Format
 
 ##### Landmarks (Port 5005)

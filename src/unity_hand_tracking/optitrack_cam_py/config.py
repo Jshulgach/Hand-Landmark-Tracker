@@ -1,12 +1,27 @@
 import os
 import sys
 
-# Add path to the compiled OptiTrack module
-sys.path.insert(
-    0,
-    r"c:\Users\NML\Desktop\Lokesh\Hand-Landmark-Tracker\src\unity_hand_tracking\optitrack_cam_py\Release",
-)
-import optitrack_cam  # noqa: F401 - Exported for other modules to import
+# Try to import compiled OptiTrack SDK module.
+# Search order:
+#   1) Existing PYTHONPATH / environment
+#   2) Environment variable OPTITRACK_CAM_PY_PATH
+#   3) Local ./Release folder next to this config file
+_sdk_extra_paths = []
+_env_sdk_path = os.environ.get("OPTITRACK_CAM_PY_PATH", "").strip()
+if _env_sdk_path:
+    _sdk_extra_paths.append(_env_sdk_path)
+
+_local_release = os.path.join(os.path.dirname(__file__), "Release")
+_sdk_extra_paths.append(_local_release)
+
+for _p in _sdk_extra_paths:
+    if _p and os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    import optitrack_cam  # noqa: F401 - Exported for other modules to import
+except Exception:
+    optitrack_cam = None
 
 # ==================== CAMERA SETTINGS ====================
 
@@ -71,6 +86,15 @@ KALMAN_3D_MEASUREMENT_NOISE = 5e-4
 # 1D angle filtering
 KALMAN_1D_PROCESS_NOISE = 0.3
 KALMAN_1D_MEASUREMENT_NOISE = 3.0
+
+# Smoothing backend
+# Options: "kalman" (adaptive Kalman), "ema" (low-latency exponential smoothing)
+SMOOTHING_METHOD = "kalman"
+
+# EMA smoothing (used when SMOOTHING_METHOD="ema")
+# Higher alpha = less smoothing / lower lag.
+EMA_3D_ALPHA = 0.45
+EMA_1D_ALPHA = 0.35
 
 # ==================== UDP BROADCASTING ====================
 

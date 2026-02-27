@@ -36,7 +36,7 @@ finger_angle_names = {
     "middle": ["middle_mcp", "middle_pip", "middle_dip"],
     "ring": ["ring_mcp", "ring_pip", "ring_dip"],
     "little": ["pinky_mcp", "pinky_pip", "pinky_dip"],
-    "thumb": ["thumb_mcp", "thumb_ip"],
+    "thumb": ["thumb_cmc_mcp", "thumb_ip"],
 }
 
 # # (comment out this entire block to disable splay forwarding)
@@ -94,15 +94,18 @@ try:
 
             packet = json.loads(data.decode("utf-8"))
 
-            # Packet format from UDPBroadcaster.send_angles():
-            #   {"frame": int, "ts": float, "angles": [{"hand_index": 0, "angles": {...}}, ...]}
-            hand_list = packet.get("angles", [])
+            # Packet format compatibility:
+            #   Old: {"frame": int, "ts": float, "angles": [{"hand_index": 0, "angles": {...}}, ...]}
+            #   New: {"frame": int, "timestamp": float, "hands": [{"hand_index": 0, "angles": {...}}, ...]}
+            hand_list = packet.get("angles")
+            if hand_list is None:
+                hand_list = packet.get("hands", [])
 
             # Debug: print first packet
             if first_packet and hand_list:
                 print("First packet received from tracker:")
                 print(f"  Frame: {packet.get('frame')}")
-                print(f"  Timestamp: {packet.get('ts')}")
+                print(f"  Timestamp: {packet.get('ts', packet.get('timestamp'))}")
                 print(f"  Hands: {len(hand_list)}")
                 if hand_list:
                     angles = hand_list[0].get("angles", {})
@@ -113,7 +116,7 @@ try:
                         f"  Thumb angles: { {k: round(angles[k], 2) for k in thumb_keys} }"
                     )
                     # Show mapped positions
-                    for i, angle_name in enumerate(["thumb_mcp", "thumb_ip"]):
+                    for i, angle_name in enumerate(["thumb_cmc_mcp", "thumb_ip"]):
                         slot = (22 + i + 1) * 3
                         val = angles.get(angle_name, "MISSING")
                         print(
