@@ -77,7 +77,6 @@ if __package__:
         UDP_IP,
         UDP_PORT_ANGLES,
         UDP_PORT_LANDMARKS,
-        UPSIDE_DOWN_CAMERAS,
     )
 else:
     from _processing_thread import ProcessingThread
@@ -99,7 +98,6 @@ else:
         UDP_IP,
         UDP_PORT_ANGLES,
         UDP_PORT_LANDMARKS,
-        UPSIDE_DOWN_CAMERAS,
     )
 
 try:
