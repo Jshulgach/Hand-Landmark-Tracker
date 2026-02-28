@@ -38,7 +38,6 @@ except ImportError:
         MODEL_COMPLEXITY,
         NUM_LANDMARKS,
         TRIANGULATION_METHOD,
-        UPSIDE_DOWN_CAMERAS,
     )
     from multi_mjpeg import CameraManager
 
@@ -237,10 +236,10 @@ class MultiCameraTracker:
         if frame is None:
             return None
 
-        # If the camera is physically upside down, rotate the image 180 degrees
-        # so MediaPipe can detect the hand properly.
-        if cam_idx in UPSIDE_DOWN_CAMERAS:
-            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        # # If the camera is physically upside down, rotate the image 180 degrees
+        # # so MediaPipe can detect the hand properly.
+        # if cam_idx in UPSIDE_DOWN_CAMERAS:
+        #     frame = cv2.rotate(frame, cv2.ROTATE_180)
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         return detector.process(rgb)
@@ -301,8 +300,8 @@ class MultiCameraTracker:
 
                 # If the camera is upside down, we rotated the image 180 degrees before MediaPipe.
                 # We must rotate the normalized coordinates back 180 degrees so they match the calibration.
-                if cam_idx in UPSIDE_DOWN_CAMERAS:
-                    landmarks_norm = 1.0 - landmarks_norm
+                # if cam_idx in UPSIDE_DOWN_CAMERAS:
+                #     landmarks_norm = 1.0 - landmarks_norm
 
                 # Extract individual landmark confidences (visibility/presence)
                 # MediaPipe Hands doesn't explicitly expose per-landmark confidence in the same way Pose does,

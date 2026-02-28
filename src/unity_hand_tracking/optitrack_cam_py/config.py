@@ -71,8 +71,8 @@ CALIBRATION_FLAGS = 0  # Use default OpenCV calibration flags
 # Hand detection
 MAX_HANDS = 1
 MODEL_COMPLEXITY = 1
-MIN_DETECTION_CONFIDENCE = 0.5
-MIN_TRACKING_CONFIDENCE = 0.5
+MIN_DETECTION_CONFIDENCE = 0.6
+MIN_TRACKING_CONFIDENCE = 0.6
 
 # Number of hand landmarks
 NUM_LANDMARKS = 21
@@ -164,14 +164,14 @@ MIN_CAMERAS_FOR_TRIANGULATION = 2
 # Maximum reprojection error for valid triangulation (in pixels)
 # Used by RANSAC to classify inlier vs outlier cameras, and to detect
 # occluded thumbs (if error > this, the camera is dropped for that landmark)
-MAX_REPROJECTION_ERROR = 50.0
+MAX_REPROJECTION_ERROR = 30
 
 # Method for combining multiple camera views
 # 'ransac' - RANSAC outlier rejection + N-view DLT (RECOMMENDED for 3+ cameras)
 # 'n_view_dlt' - Triangulate using all available cameras simultaneously (no outlier rejection)
 # 'simple_average' - Average all triangulated points
 # 'weighted_average' - Weight by detection confidence
-# 'reprojection' - Weight by reprojection confidence
+# 'reprojection' - Weight by camera confidence
 # 'weighted_error' - Find the best pair of cameras with lowest reprojection error
 # 'best_triplet' - Find the best 3 cameras using N-view DLT triangulation
 TRIANGULATION_METHOD = "ransac"

@@ -1196,8 +1196,8 @@ class StereoHandTrackerGUI(QMainWindow):
 
                 # If the camera is upside down, rotate the frame 180 degrees permanently
                 # so it looks right-side up in the GUI.
-                if idx in UPSIDE_DOWN_CAMERAS:
-                    display_frame = cv2.rotate(display_frame, cv2.ROTATE_180)
+                # if idx in UPSIDE_DOWN_CAMERAS:
+                #     display_frame = cv2.rotate(display_frame, cv2.ROTATE_180)
 
                 # Draw per-finger coloured skeleton on 2D camera view
                 if results and results.multi_hand_landmarks:
