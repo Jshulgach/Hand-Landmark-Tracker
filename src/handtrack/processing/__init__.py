@@ -31,5 +31,6 @@ from ._smoothing import (
     finger_bend_angles,
     finger_splay_angles,
 )
+from ._anatomical_constraints import enforce_pip_constraints
 from ._smoothing_factory import build_smoother_factories
 # from ._pipeline import run_pipeline

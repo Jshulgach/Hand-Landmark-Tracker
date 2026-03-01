@@ -103,6 +103,7 @@ else:
 try:
     from handtrack.processing import (
         build_smoother_factories,
+        enforce_pip_constraints,
         finger_bend_angles,
     )
 except ImportError:
@@ -1112,6 +1113,7 @@ class StereoHandTrackerGUI(QMainWindow):
                 n_cams_per_lm,
             ) in enumerate(triangulated_hands_data):
                 all_best_cams.update(best_cams)
+                # landmarks_3d = enforce_pip_constraints(landmarks_3d)
                 if self.apply_kalman and hand_idx < len(self.kalman_filters):
                     filtered_landmarks = np.array(
                         [
