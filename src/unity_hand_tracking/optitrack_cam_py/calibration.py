@@ -432,7 +432,7 @@ def main():
         print("No cameras found. Exiting.")
         return
 
-    mgr.start_all()
+    mgr.start_all(exposure=10)
     num_cameras = mgr.num_cameras
     img_size = mgr.get_resolution(0)  # (width, height)
 
