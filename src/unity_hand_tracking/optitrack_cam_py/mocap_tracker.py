@@ -443,6 +443,11 @@ class MultiCameraTracker:
         if n < 2:
             return None, [], float("inf")
 
+        # For 3+ camera observations, require at least 3 agreeing views
+        # so pairwise outliers are less likely to pass through.
+        if n >= 3:
+            min_inliers = max(min_inliers, 3)
+
         # If only 2 cameras, just do DLT directly (no outlier to reject)
         if n == 2:
             Ps = [self.projection_matrices[idx] for idx in camera_indices]
@@ -733,6 +738,9 @@ class MultiCameraTracker:
         reproj_errors = []
         num_cameras_per_lm = []
         cam_indices = list(matched_group.keys())
+        # Conservative pre-3D gate: require 3 views when possible, otherwise 2.
+        min_views_per_landmark = 3 if len(cam_indices) >= 3 else 2
+        landmark_conf_threshold = 0.82
 
         for lm_idx in range(self.num_landmarks):
             pts_2d = []
@@ -745,10 +753,17 @@ class MultiCameraTracker:
 
                 # Only use this camera's landmark if its confidence is above a threshold
                 # (Currently using camera_conf as a proxy for landmark confidence)
-                if lm_confs[lm_idx] > 0.1:  # Basic threshold
+                if lm_confs[lm_idx] > landmark_conf_threshold:
                     pts_2d.append(landmarks[lm_idx])
                     confs.append(lm_confs[lm_idx])
                     valid_cams.append(cam_idx)
+
+            # Exclude jitter-prone landmarks before triangulation if too few cameras agree.
+            if len(valid_cams) < min_views_per_landmark:
+                landmarks_3d.append(np.zeros(3))
+                reproj_errors.append(float("inf"))
+                num_cameras_per_lm.append(0)
+                continue
 
             pt3d, used_cams, error = self.triangulate_landmark(
                 pts_2d, valid_cams, confs
