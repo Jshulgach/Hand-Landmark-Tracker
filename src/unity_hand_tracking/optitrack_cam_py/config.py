@@ -128,7 +128,7 @@ MULTI_CAMERA_MODE = None
 
 # ==================== JOINT ANGLE NAMES ====================
 
-# All 14 joint angles tracked (3 per finger, 2 for thumb)
+# All 18 joint angles tracked (3 per finger, 2 for thumb, 4 splay)
 # Note: thumb_cmc_mcp matches the LSL broadcast stream channel naming
 ANGLE_NAMES = [
     "index_mcp",
@@ -147,14 +147,14 @@ ANGLE_NAMES = [
     "thumb_ip",
 ]
 
-# # --- Splay angles (comment out to disable splay Kalman filtering) --- it was so bad for now the calculation is very off it looks like
-# ANGLE_NAMES += [
-#     "index_splay",
-#     "middle_splay",
-#     "ring_splay",
-#     "pinky_splay",
-# ]
-# # --- End splay ---
+# --- Splay angles (comment out to disable splay Kalman filtering) ---
+ANGLE_NAMES += [
+    "index_splay",
+    "middle_splay",
+    "ring_splay",
+    "pinky_splay",
+]
+# --- End splay ---
 
 # ==================== TRIANGULATION SETTINGS ====================
 

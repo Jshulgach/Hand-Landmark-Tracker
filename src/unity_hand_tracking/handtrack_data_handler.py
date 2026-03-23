@@ -39,15 +39,15 @@ finger_angle_names = {
     "thumb": ["thumb_cmc_mcp", "thumb_ip"],
 }
 
-# # (comment out this entire block to disable splay forwarding)
-# # --- Splay angles ---
-# finger_splay_names = {
-#     "index": "index_splay",
-#     "middle": "middle_splay",
-#     "ring": "ring_splay",
-#     "little": "pinky_splay",
-# }
-# # --- End splay ---
+# (comment out this entire block to disable splay forwarding)
+# --- Splay angles ---
+finger_splay_names = {
+    "index": "index_splay",
+    "middle": "middle_splay",
+    "ring": "ring_splay",
+    "little": "pinky_splay",
+}
+# --- End splay ---
 
 
 print(f"FORWARDER: Listening on {UDP_IP}:{UDP_PORT}")
@@ -70,13 +70,17 @@ def map_tracker_to_unity(tracker_angles):
                 val = tracker_angles[angle_name]
                 data_list[joint_idx] = str(round(val, 4))
 
-        # # --- Splay: write to Y slot of metacarpal (comment out to disable) ---
-        # if finger in finger_splay_names:
-        #     splay_name = finger_splay_names[finger]
-        #     if splay_name in tracker_angles:
-        #         metacarpal_y_slot = start_idx * 3 + 1  # Y slot of bone 0
-        #         data_list[metacarpal_y_slot] = str(round(tracker_angles[splay_name], 4))
-        # # --- End splay ---
+        # --- Splay: write to Y slot of metacarpal (comment out to disable) ---
+        if finger in finger_splay_names:
+            splay_name = finger_splay_names[finger]
+            if splay_name in tracker_angles:
+                metacarpal_y_slot = start_idx * 3 + 1  # Y slot of bone 0
+                val = tracker_angles[splay_name]
+                # Unity's little finger MCP rest pose is -15.383°, offset to correct
+                if finger == "little":
+                    val -= 15.383
+                data_list[metacarpal_y_slot] = str(round(val, 4))
+        # --- End splay ---
 
     return ",".join(data_list)
 

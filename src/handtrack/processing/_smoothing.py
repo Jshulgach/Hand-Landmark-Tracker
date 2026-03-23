@@ -193,52 +193,186 @@ def finger_bend_angles(landmarks):
     return angles
 
 
-def finger_splay_angles(landmarks):
-    # Reference axis: wrist -> middle fingertip.
-    wrist = landmarks[0]
-    ref = landmarks[12] - wrist
-    ref_norm = np.linalg.norm(ref)
-    if ref_norm < 1e-8:
-        return {}
-    ref = ref / ref_norm
+# Maps each finger to (MCP index, TIP index) for splay computation.
+# MCP→TIP spans the full finger length — maximally stable, minimally affected by jitter.
+# Each finger uses wrist → its own MCP as the reference direction.
+FINGER_SEGMENTS = {
+    "index": (5, 8),  # MCP=5,  PIP=6
+    "middle": (9, 12),  # MCP=9,  PIP=10
+    "ring": (13, 16),  # MCP=13, PIP=14
+    "pinky": (17, 20),  # MCP=17, PIP=18
+}
 
-    # Palm normal disambiguates sign for splay (left/right of reference axis).
-    v1 = landmarks[8] - wrist
-    v2 = landmarks[20] - wrist
-    palm_normal = np.cross(v1, v2)
-    norm = np.linalg.norm(palm_normal)
-    if norm < 1e-8:
-        return {}
-    palm_normal = palm_normal / norm
+# Legacy bias storage kept for compatibility. Splay now uses an explicit
+# per-finger reference vector captured by calibration instead of bias angles.
+SPLAY_BIAS_DEG = {
+    "index": 0.0,
+    "middle": 0.0,
+    "ring": 0.0,
+    "pinky": 0.0,
+}
 
-    tips = {
-        "index": landmarks[8],
-        "middle": landmarks[12],
-        "ring": landmarks[16],
-        "pinky": landmarks[20],
+# Per-finger calibrated reference vectors stored in palm-plane XY coordinates.
+SPLAY_REFERENCE_2D = {name: None for name in FINGER_SEGMENTS}
+
+# Approximate physiological MCP abduction/adduction limits (degrees) used to
+# compress large projected splay angles into a realistic range.
+SPLAY_PHYSIO_MAX_DEG = {
+    "index": 10,
+    "middle": 8.0,
+    "ring": 8.0,
+    "pinky": 10.0,
+}
+
+
+def _compress_splay_angle(angle_deg: float, finger_name: str) -> float:
+    """
+    Physiological saturation: linear near 0°, smoothly bounded at ±max_deg.
+
+    scaled = max_deg * tanh(raw / max_deg)
+    """
+    max_deg = float(SPLAY_PHYSIO_MAX_DEG.get(finger_name, 25.0))
+    if max_deg <= 1e-6:
+        return angle_deg
+    return max_deg * np.tanh(angle_deg / max_deg)
+
+
+def _coerce_landmarks_3d(landmarks):
+    lm = np.array(landmarks, dtype=float)
+    if lm.ndim != 2 or lm.shape[0] != 21:
+        return None
+    if lm.shape[1] == 2:
+        lm = np.hstack([lm, np.zeros((21, 1))])
+    return lm
+
+
+def _build_palm_frame(lm):
+    # Palm normal from knuckle row × proximal-distal axis
+    u = lm[5] - lm[17]  # index_MCP − pinky_MCP
+    v = lm[9] - lm[0]  # middle_MCP − wrist
+    n = np.cross(u, v)
+    n_norm = np.linalg.norm(n)
+    if n_norm < 1e-6:
+        return None
+    n = n / n_norm
+
+    ex = u - np.dot(u, n) * n
+    ex_norm = np.linalg.norm(ex)
+    if ex_norm < 1e-6:
+        return None
+    ex = ex / ex_norm
+
+    ey = np.cross(n, ex)
+    ey_norm = np.linalg.norm(ey)
+    if ey_norm < 1e-6:
+        return None
+    ey = ey / ey_norm
+    return n, ex, ey
+
+
+def set_splay_reference(landmarks):
+    """Capture the current projected MCP→TIP directions as splay references."""
+    lm = _coerce_landmarks_3d(landmarks)
+    if lm is None:
+        return None
+
+    frame = _build_palm_frame(lm)
+    if frame is None:
+        return None
+    _, ex, ey = frame
+
+    def to_palm_xy(vec3: np.ndarray) -> np.ndarray:
+        return np.array([np.dot(vec3, ex), np.dot(vec3, ey)])
+
+    refs = {}
+    for name, (mcp_idx, tip_idx) in FINGER_SEGMENTS.items():
+        ref_2d = to_palm_xy(lm[tip_idx] - lm[mcp_idx])
+        ref_norm = np.linalg.norm(ref_2d)
+        if ref_norm < 1e-6:
+            continue
+        ref_2d = ref_2d / ref_norm
+        ref_2d[1] = abs(ref_2d[1])
+        refs[name] = ref_2d
+
+    if not refs:
+        return None
+
+    for name in FINGER_SEGMENTS:
+        SPLAY_REFERENCE_2D[name] = refs.get(name)
+    return {
+        name: (None if vec is None else vec.copy())
+        for name, vec in SPLAY_REFERENCE_2D.items()
     }
-    rest_offsets = {
-        "index": 0.0,
-        "middle": 0.0,
-        "ring": 0.0,
-        "pinky": -15.383,
-    }
+
+
+def clear_splay_reference():
+    for name in FINGER_SEGMENTS:
+        SPLAY_REFERENCE_2D[name] = None
+
+
+def finger_splay_angles(landmarks) -> dict[str, float]:
+    """
+    Compute per-finger lateral splay angles projected onto the palm plane.
+
+    Each finger's reference direction is wrist → that finger's own MCP,
+    projected onto the palm plane. This means each finger's splay is measured
+    relative to its own neutral metacarpal axis, not a shared middle-finger axis.
+
+    Works correctly for 3D world-space input (21, 3) from stereo triangulation.
+    For legacy 2D input (21, 2) the math reduces to a 2D atan2 calculation.
+
+    Sign: positive = CCW (spreading away from middle), negative = CW.
+    """
+    lm = _coerce_landmarks_3d(landmarks)
+    if lm is None:
+        return {f"{name}_splay": 0.0 for name in FINGER_SEGMENTS}
+    frame = _build_palm_frame(lm)
+    if frame is None:
+        return {f"{name}_splay": 0.0 for name in FINGER_SEGMENTS}
+    _, ex, ey = frame
+
+    def to_palm_xy(vec3: np.ndarray) -> np.ndarray:
+        return np.array([np.dot(vec3, ex), np.dot(vec3, ey)])
 
     angles = {}
-    for name, tip in tips.items():
-        finger_vec = tip - wrist
-        finger_norm = np.linalg.norm(finger_vec)
-        if finger_norm < 1e-8:
-            angles[f"{name}_splay"] = rest_offsets[name]
+    pinky_v_f_2d = None
+    for name, (mcp_idx, tip_idx) in FINGER_SEGMENTS.items():
+        v_f_2d = to_palm_xy(lm[tip_idx] - lm[mcp_idx])
+        f_norm = np.linalg.norm(v_f_2d)
+        if f_norm < 1e-6:
+            angles[f"{name}_splay"] = 0.0
             continue
-        finger_vec = finger_vec / finger_norm
-        # Unsigned angle from reference axis, then signed using palm normal.
-        dot = np.clip(np.dot(finger_vec, ref), -1.0, 1.0)
-        angle = np.degrees(np.arccos(dot))
-        cross = np.cross(ref, finger_vec)
-        if np.dot(cross, palm_normal) < 0:
-            angle = -angle
+        v_f_2d = v_f_2d / f_norm
+        v_f_2d[1] = abs(v_f_2d[1])
 
-        # Optional rest offsets align with a neutral hand posture baseline.
-        angles[f"{name}_splay"] = angle + rest_offsets[name]
+        stored_ref = SPLAY_REFERENCE_2D.get(name)
+        if stored_ref is None:
+            v_ref_2d = v_f_2d.copy()
+        else:
+            v_ref_2d = stored_ref.copy()
+            ref_norm = np.linalg.norm(v_ref_2d)
+            if ref_norm < 1e-6:
+                v_ref_2d = v_f_2d.copy()
+            else:
+                v_ref_2d = v_ref_2d / ref_norm
+
+        # Store pinky's v_f_2d for debug output
+        if name == "pinky":
+            pinky_v_f_2d = v_f_2d.copy()
+
+        signed_sin = v_ref_2d[0] * v_f_2d[1] - v_ref_2d[1] * v_f_2d[0]
+        signed_cos = np.dot(v_ref_2d, v_f_2d)
+        raw_angle = -np.degrees(np.arctan2(signed_sin, signed_cos))
+        angles[f"{name}_splay"] = _compress_splay_angle(raw_angle, name)
+
+    # Debug output: print all splay angles and pinky v_f_2d
+    debug_msg = (
+        f"\r[Splay] I:{angles['index_splay']:.1f}° "
+        f"M:{angles['middle_splay']:.1f}° "
+        f"R:{angles['ring_splay']:.1f}° "
+        f"P:{angles['pinky_splay']:.1f}°"
+    )
+    if pinky_v_f_2d is not None:
+        debug_msg += f" | pinky_v_f_2d: [{pinky_v_f_2d[0]:.2f}, {pinky_v_f_2d[1]:.2f}]"
+    print(debug_msg, end="", flush=True)
     return angles

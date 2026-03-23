@@ -102,9 +102,11 @@ else:
 
 try:
     from handtrack.processing import (
+        SPLAY_REFERENCE_2D,
         build_smoother_factories,
-        enforce_pip_constraints,
         finger_bend_angles,
+        finger_splay_angles,
+        set_splay_reference,
     )
 except ImportError:
     from pathlib import Path
@@ -113,8 +115,11 @@ except ImportError:
     if str(_src_root) not in sys.path:
         sys.path.insert(0, str(_src_root))
     from handtrack.processing import (
+        SPLAY_REFERENCE_2D,
         build_smoother_factories,
         finger_bend_angles,
+        finger_splay_angles,
+        set_splay_reference,
     )
 
 
@@ -163,6 +168,8 @@ class StereoHandTrackerGUI(QMainWindow):
         self.show_3d_front = False
         self.show_3d_side = False
         self.show_3d_iso = True
+        self.show_3d_palm = False
+        self.show_splay_vf_vectors = True
         self.frame_count = 0
         self.max_hands = MAX_HANDS
         self.show_raw_filtered_overlay = False
@@ -447,8 +454,33 @@ class StereoHandTrackerGUI(QMainWindow):
         self.cb_3d_iso.toggled.connect(lambda c: setattr(self, "show_3d_iso", c))
         views_3d_layout.addWidget(self.cb_3d_iso)
 
+        self.cb_3d_palm = QCheckBox("Palm")
+        self.cb_3d_palm.setChecked(self.show_3d_palm)
+        self.cb_3d_palm.toggled.connect(lambda c: setattr(self, "show_3d_palm", c))
+        views_3d_layout.addWidget(self.cb_3d_palm)
+
         processing_layout.addWidget(views_3d_group)
         layout.addWidget(processing_group)
+        # ---- Splay Calibration ----
+        splay_group = QGroupBox("Splay")
+        splay_layout = QVBoxLayout(splay_group)
+        splay_layout.setSpacing(3)
+        self.splay_calib_btn = QPushButton("Set Splay Reference")
+        self.splay_calib_btn.setToolTip(
+            "Hold the desired reference pose, then click to capture projected MCP-to-tip reference vectors."
+        )
+        self.splay_calib_btn.clicked.connect(self.calibrate_splay_bias)
+        splay_layout.addWidget(self.splay_calib_btn)
+        self.splay_bias_label = QLabel("Reference — not set")
+        self.splay_bias_label.setStyleSheet("font-size: 10px; color: #aaa;")
+        splay_layout.addWidget(self.splay_bias_label)
+        self.splay_vf_checkbox = QCheckBox("Show projected v_f")
+        self.splay_vf_checkbox.setChecked(self.show_splay_vf_vectors)
+        self.splay_vf_checkbox.toggled.connect(
+            lambda c: setattr(self, "show_splay_vf_vectors", c)
+        )
+        splay_layout.addWidget(self.splay_vf_checkbox)
+        layout.addWidget(splay_group)
         # ---- Smoothing / Jitter ----
         smooth_group = QGroupBox("Smoothing")
         smooth_layout = QVBoxLayout(smooth_group)
@@ -778,7 +810,9 @@ class StereoHandTrackerGUI(QMainWindow):
             print("  - Sample Rate: Irregular (0 Hz)")
             print("\nAngles Stream: StereoHandTracker_Angles")
             print("  - Type: MOCAP")
-            print("  - Channels: 28 (2 hands × 14 angles)")
+            print(
+                f"  - Channels: {2 * len(ANGLE_NAMES)} (2 hands × {len(ANGLE_NAMES)} angles)"
+            )
             print("  - Format: float32")
             print("  - Sample Rate: Irregular (0 Hz)")
             print(f"  - Angle Names: {ANGLE_NAMES}")
@@ -934,6 +968,25 @@ class StereoHandTrackerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     # Tracking start / stop
     # ------------------------------------------------------------------ #
+    def calibrate_splay_bias(self):
+        """Capture the current projected MCP→TIP directions as splay references."""
+        landmarks = getattr(self, "_last_splay_landmarks", None)
+        if landmarks is None:
+            self.splay_bias_label.setText("No data — start tracking first.")
+            return
+        refs = set_splay_reference(landmarks)
+        if refs is None:
+            self.splay_bias_label.setText("Reference failed — invalid palm frame.")
+            return
+        self.splay_bias_label.setText("Reference — captured")
+        print(
+            "\n[Splay Reference] Captured — "
+            f"I:{refs['index'][0]:.2f},{refs['index'][1]:.2f} "
+            f"M:{refs['middle'][0]:.2f},{refs['middle'][1]:.2f} "
+            f"R:{refs['ring'][0]:.2f},{refs['ring'][1]:.2f} "
+            f"P:{refs['pinky'][0]:.2f},{refs['pinky'][1]:.2f}"
+        )
+
     def toggle_tracking(self):
         if self.is_running:
             self.stop_tracking()
@@ -1141,10 +1194,10 @@ class StereoHandTrackerGUI(QMainWindow):
                 if tracked_label == "None":
                     tracked_label = hand_label
                 joint_angles = finger_bend_angles(landmarks_array)
-
-                # # -- Trying to do splay angles --#
-                # splay_angles = finger_splay_angles(landmarks_array)
-                # joint_angles.update(splay_angles)
+                splay_angles = finger_splay_angles(landmarks_array)
+                joint_angles.update(splay_angles)
+                if hand_idx == 0:
+                    self._last_splay_landmarks = np.array(landmarks_array, copy=True)
 
                 # # -- Comment if unecessary or bad lol --#
                 if self.apply_kalman and hand_idx < len(self.angle_kalman_filters):
@@ -1173,13 +1226,9 @@ class StereoHandTrackerGUI(QMainWindow):
                 )
                 selected_idx += 1
                 if hand_idx == 0:
-                    print(
-                        f"\rFrame {self.frame_count} [3D Triangulated] - "
-                        f"Thumb CMC-MCP: {joint_angles['thumb_cmc_mcp']:.2f}\u00b0, "
-                        f"Thumb IP: {joint_angles['thumb_ip']:.2f}\u00b0 | ",
-                        end="",
-                        flush=True,
-                    )
+                    self._last_joint_angles = joint_angles
+                    # Debug output moved to finger_splay_angles function
+
             # Broadcast
             if self.udp_enabled or self.lsl_broadcaster:
                 if frame_landmarks:
@@ -1379,6 +1428,8 @@ class StereoHandTrackerGUI(QMainWindow):
             active_views.append("side")
         if self.show_3d_iso:
             active_views.append("iso")
+        if self.show_3d_palm:
+            active_views.append("palm")
 
         if not active_views:
             # Nothing enabled — show placeholder
@@ -1420,6 +1471,7 @@ class StereoHandTrackerGUI(QMainWindow):
             "front": "Front (XY)",
             "side": "Side (ZY)",
             "iso": "Iso",
+            "palm": "Palm Plane",
         }
         for vname, (ox, oy, vw, vh) in view_rects.items():
             cv2.putText(
@@ -1497,6 +1549,21 @@ class StereoHandTrackerGUI(QMainWindow):
                 (19, 20, PINKY_COLOR),
             ]
 
+            # Palm-plane basis vectors (captured in project_point closure)
+            _hl = np.array(hand_landmarks, dtype=float)
+            _pm_u = _hl[5] - _hl[17]
+            _pm_u_norm = np.linalg.norm(_pm_u)
+            _pm_e_right = (
+                (_pm_u / _pm_u_norm) if _pm_u_norm > 1e-6 else np.array([1.0, 0.0, 0.0])
+            )
+            _pm_v = _hl[9] - _hl[0]
+            _pm_n = np.cross(_pm_e_right, _pm_v)
+            _pm_n_norm = np.linalg.norm(_pm_n)
+            _pm_n = (
+                (_pm_n / _pm_n_norm) if _pm_n_norm > 1e-6 else np.array([0.0, 0.0, 1.0])
+            )
+            _pm_e_up = np.cross(_pm_n, _pm_e_right)
+
             def project_point(p, view_type, cx, cy):
                 """Project a centered 3D point to 2D pixel coords within a view rect."""
                 x, y, z = -p[0], -p[1], p[2]  # Mirror X & Y so user sees their own hand
@@ -1512,6 +1579,10 @@ class StereoHandTrackerGUI(QMainWindow):
                 elif view_type == "iso":
                     u = int((x * cos_a - z * cos_a) * scale) + cx
                     v = int((-y + x * sin_a + z * sin_a) * scale * 0.8) + cy
+                elif view_type == "palm":
+                    # Project onto palm coordinate frame (hand-relative, no world mirror)
+                    u = int(np.dot(p, _pm_e_right) * scale) + cx
+                    v = int(-np.dot(p, _pm_e_up) * scale) + cy
                 return u, v
 
             def draw_skeleton(
@@ -1534,6 +1605,113 @@ class StereoHandTrackerGUI(QMainWindow):
 
             for vname, (ox, oy, vw, vh) in view_rects.items():
                 draw_skeleton(vname, ox, oy, vw, vh, hand_landmarks)
+
+            # --- Splay reference vectors ---
+            # Draw the stored splay reference vectors (captured on button press)
+            # and the current projected v_f vectors using the same palm-plane
+            # coordinate system as finger_splay_angles.
+            lm = np.array(hand_landmarks, dtype=float)
+            _u = lm[5] - lm[17]
+            _v = lm[9] - lm[0]
+            _n = np.cross(_u, _v)
+            _n_norm = np.linalg.norm(_n)
+            if _n_norm > 1e-6:
+                _n = _n / _n_norm
+                _ex = _u - np.dot(_u, _n) * _n
+                _ex_norm = np.linalg.norm(_ex)
+                if _ex_norm > 1e-6:
+                    _ex = _ex / _ex_norm
+                    _ey = np.cross(_n, _ex)
+                    _ey_norm = np.linalg.norm(_ey)
+                else:
+                    _ey_norm = 0.0
+
+                if _ey_norm > 1e-6:
+                    _ey = _ey / _ey_norm
+
+                    def _to_palm_xy(_vec3):
+                        _vec3_plane = _vec3 - np.dot(_vec3, _n) * _n
+                        return np.array(
+                            [
+                                np.dot(_vec3_plane, _ex),
+                                np.dot(_vec3_plane, _ey),
+                            ]
+                        )
+
+                    def _from_palm_xy(_vec2):
+                        return _vec2[0] * _ex + _vec2[1] * _ey
+
+                    _finger_vectors = {
+                        "index": (5, 8),
+                        "middle": (9, 12),
+                        "ring": (13, 16),
+                        "pinky": (17, 20),
+                    }
+                    REF_COLOR = (255, 255, 255)  # white
+                    VF_COLOR = (70, 70, 70)  # dark gray
+                    DOT_SPACING = 4
+
+                    for _fname, (_mcp_idx, _tip_idx) in _finger_vectors.items():
+                        _mcp = lm[_mcp_idx]
+                        _tip = lm[_tip_idx]
+                        if np.linalg.norm(_mcp) < 1e-3 or np.linalg.norm(_tip) < 1e-3:
+                            continue
+
+                        _v_f_2d = _to_palm_xy(_tip - _mcp)
+                        _vf_norm = np.linalg.norm(_v_f_2d)
+                        if _vf_norm < 1e-6:
+                            continue
+                        _v_f_2d[1] = abs(_v_f_2d[1])
+                        _v_f = _from_palm_xy(_v_f_2d)
+
+                        _stored_ref_2d = SPLAY_REFERENCE_2D.get(_fname)
+                        if _stored_ref_2d is None:
+                            _ref_2d = _v_f_2d.copy()
+                        else:
+                            _ref_2d = np.array(_stored_ref_2d, dtype=float)
+                        _ref = _from_palm_xy(_ref_2d)
+
+                        _ref_norm = np.linalg.norm(_ref)
+                        _v_f_norm = np.linalg.norm(_v_f)
+                        if _ref_norm < 1e-6 or _v_f_norm < 1e-6:
+                            continue
+                        _ref = _ref / _ref_norm
+                        _v_f = _v_f / _v_f_norm
+
+                        _proj_len = np.linalg.norm(_to_palm_xy(_tip - _mcp))
+                        _ref_tip = _mcp + _ref * _proj_len
+                        _vf_tip = _mcp + _v_f * _proj_len
+
+                        for vname, (ox, oy, vw, vh) in view_rects.items():
+                            cx = ox + vw // 2
+                            cy = oy + vh // 2
+
+                            u1, v1 = project_point(_mcp - centroid, vname, cx, cy)
+
+                            # Dotted white reference arrow.
+                            u2, v2 = project_point(_ref_tip - centroid, vname, cx, cy)
+                            dx, dy = u2 - u1, v2 - v1
+                            seg_len = max(1, int(np.hypot(dx, dy)))
+                            n_dots = max(2, seg_len // DOT_SPACING)
+                            for k in range(n_dots):
+                                t = k / (n_dots - 1)
+                                cv2.circle(
+                                    canvas,
+                                    (int(u1 + t * dx), int(v1 + t * dy)),
+                                    1,
+                                    REF_COLOR,
+                                    -1,
+                                )
+                            cv2.circle(canvas, (u2, v2), 2, REF_COLOR, -1)
+
+                            if self.show_splay_vf_vectors:
+                                # Solid dark-gray projected v_f arrow.
+                                u3, v3 = project_point(
+                                    _vf_tip - centroid, vname, cx, cy
+                                )
+                                cv2.line(canvas, (u1, v1), (u3, v3), VF_COLOR, 1)
+                                cv2.circle(canvas, (u3, v3), 2, VF_COLOR, -1)
+            # --- End splay reference vectors ---
 
             if self.show_raw_filtered_overlay and idx < len(raw_hands):
                 raw_points = raw_hands[idx]

@@ -1,3 +1,4 @@
+from ._anatomical_constraints import enforce_pip_constraints
 from ._features import (
     extract_features,
     integrated_emg,
@@ -25,12 +26,15 @@ from ._preprocessing import EMGPreprocessor
 from ._smoothing import (
     EMA1D,
     EMA3D,
+    SPLAY_BIAS_DEG,
+    SPLAY_REFERENCE_2D,
     AdaptiveKalman3D,
     Kalman1D,
     angle_between,
+    clear_splay_reference,
     finger_bend_angles,
     finger_splay_angles,
+    set_splay_reference,
 )
-from ._anatomical_constraints import enforce_pip_constraints
 from ._smoothing_factory import build_smoother_factories
 # from ._pipeline import run_pipeline
