@@ -28,13 +28,18 @@ from ._smoothing import (
     EMA3D,
     SPLAY_BIAS_DEG,
     SPLAY_REFERENCE_2D,
+    SPLAY_REF_STORE,
+    SPLAY_ZERO_OFFSETS,
     AdaptiveKalman3D,
     Kalman1D,
     angle_between,
     clear_splay_reference,
+    clear_splay_zero,
     finger_bend_angles,
     finger_splay_angles,
+    finger_splay_angles_v2,
     set_splay_reference,
+    set_splay_zero,
 )
 from ._smoothing_factory import build_smoother_factories
 # from ._pipeline import run_pipeline

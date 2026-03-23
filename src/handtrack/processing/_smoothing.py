@@ -218,10 +218,10 @@ SPLAY_REFERENCE_2D = {name: None for name in FINGER_SEGMENTS}
 # Approximate physiological MCP abduction/adduction limits (degrees) used to
 # compress large projected splay angles into a realistic range.
 SPLAY_PHYSIO_MAX_DEG = {
-    "index": 10,
-    "middle": 8.0,
-    "ring": 8.0,
-    "pinky": 10.0,
+    "index": 25.0,
+    "middle": 20.0,
+    "ring": 20.0,
+    "pinky": 30.0,
 }
 
 
@@ -308,6 +308,137 @@ def set_splay_reference(landmarks):
 def clear_splay_reference():
     for name in FINGER_SEGMENTS:
         SPLAY_REFERENCE_2D[name] = None
+
+
+# ── v2 splay: scalar-offset zeroing ──────────────────────────────────────────
+# Tip landmark indices per finger (wrist→tip vectors used in v2).
+_FINGER_TIPS_V2 = {"index": 8, "middle": 12, "ring": 16, "pinky": 20}
+_MIDDLE_TIP_IDX = 12  # wrist→middle_tip is the shared reference
+
+# Scalar angle offsets captured on button press. Each frame subtracts these
+# so the captured pose reads 0°.
+SPLAY_ZERO_OFFSETS: dict[str, float] = {name: 0.0 for name in _FINGER_TIPS_V2}
+
+# Reference unit vector (palm-plane 2D) frozen at button press.
+# Stored relative to the palm frame so it tracks natural palm orientation.
+# Mutable dict so importers always see the live value through the same object.
+# SPLAY_REF_STORE["unit_2d"] is None until set_splay_zero() is called.
+SPLAY_REF_STORE: dict = {"unit_2d": None}
+
+
+def set_splay_zero(landmarks):
+    """
+    Freeze the current wrist→middle_tip direction as the shared reference
+    vector (in palm-plane 2D), then measure each finger's current angle
+    against it and store those as SPLAY_ZERO_OFFSETS.
+
+    After this call, finger_splay_angles_v2 will output 0° for the pose
+    captured here, and non-zero for any deviation from it.
+
+    Returns {name: offset_deg} on success, None on failure.
+    """
+    lm = _coerce_landmarks_3d(landmarks)
+    if lm is None:
+        return None
+    frame = _build_palm_frame(lm)
+    if frame is None:
+        return None
+    _, ex, ey = frame
+
+    def to_palm_xy(vec3: np.ndarray) -> np.ndarray:
+        return np.array([np.dot(vec3, ex), np.dot(vec3, ey)])
+
+    v_ref_2d = to_palm_xy(lm[_MIDDLE_TIP_IDX] - lm[0])
+    ref_norm = np.linalg.norm(v_ref_2d)
+    if ref_norm < 1e-6:
+        return None
+    v_ref_2d = v_ref_2d / ref_norm
+
+    # Freeze this as the shared reference for all future frames.
+    SPLAY_REF_STORE["unit_2d"] = v_ref_2d.copy()
+
+    for name, tip_idx in _FINGER_TIPS_V2.items():
+        v_f_2d = to_palm_xy(lm[tip_idx] - lm[0])
+        f_norm = np.linalg.norm(v_f_2d)
+        if f_norm < 1e-6:
+            SPLAY_ZERO_OFFSETS[name] = 0.0
+            continue
+        v_f_2d = v_f_2d / f_norm
+        signed_sin = v_ref_2d[0] * v_f_2d[1] - v_ref_2d[1] * v_f_2d[0]
+        signed_cos = np.dot(v_ref_2d, v_f_2d)
+        SPLAY_ZERO_OFFSETS[name] = np.degrees(np.arctan2(signed_sin, signed_cos))
+
+    return {name: SPLAY_ZERO_OFFSETS[name] for name in _FINGER_TIPS_V2}
+
+
+def clear_splay_zero():
+    """Reset all splay zero offsets and the frozen reference to 0°/None."""
+    SPLAY_REF_STORE["unit_2d"] = None
+    for name in _FINGER_TIPS_V2:
+        SPLAY_ZERO_OFFSETS[name] = 0.0
+
+
+def finger_splay_angles_v2(landmarks) -> dict[str, float]:
+    """
+    Compute per-finger splay angles using wrist→tip vectors (v2 method).
+
+    Reference vector: wrist (idx 0) → middle_tip (idx 12), projected onto palm plane.
+    Per-finger vector: wrist (idx 0) → that finger's tip, projected onto palm plane.
+
+    Raw angle = signed angle (CCW+) from reference to finger vector in palm plane.
+    Zeroed angle = raw_angle − SPLAY_ZERO_OFFSETS[name]  (button press sets zero).
+    Output = tanh-compressed zeroed angle.
+    """
+    lm = _coerce_landmarks_3d(landmarks)
+    if lm is None:
+        return {f"{name}_splay": 0.0 for name in _FINGER_TIPS_V2}
+    frame = _build_palm_frame(lm)
+    if frame is None:
+        return {f"{name}_splay": 0.0 for name in _FINGER_TIPS_V2}
+    _, ex, ey = frame
+
+    def to_palm_xy(vec3: np.ndarray) -> np.ndarray:
+        return np.array([np.dot(vec3, ex), np.dot(vec3, ey)])
+
+    if SPLAY_REF_STORE["unit_2d"] is not None:
+        # Use the frozen reference direction (captured at button press).
+        v_ref_2d = np.array(SPLAY_REF_STORE["unit_2d"], dtype=float)
+    else:
+        # No reference set yet — compute from current middle tip (middle reads 0°).
+        v_ref_2d = to_palm_xy(lm[_MIDDLE_TIP_IDX] - lm[0])
+        ref_norm = np.linalg.norm(v_ref_2d)
+        if ref_norm < 1e-6:
+            return {f"{name}_splay": 0.0 for name in _FINGER_TIPS_V2}
+        v_ref_2d = v_ref_2d / ref_norm
+
+    angles = {}
+    pinky_v_f_2d = None
+    for name, tip_idx in _FINGER_TIPS_V2.items():
+        v_f_2d = to_palm_xy(lm[tip_idx] - lm[0])
+        f_norm = np.linalg.norm(v_f_2d)
+        if f_norm < 1e-6:
+            angles[f"{name}_splay"] = 0.0
+            continue
+        v_f_2d = v_f_2d / f_norm
+        if name == "pinky":
+            pinky_v_f_2d = v_f_2d.copy()
+        signed_sin = v_ref_2d[0] * v_f_2d[1] - v_ref_2d[1] * v_f_2d[0]
+        signed_cos = np.dot(v_ref_2d, v_f_2d)
+        raw_angle = np.degrees(np.arctan2(signed_sin, signed_cos))
+        zeroed = raw_angle - SPLAY_ZERO_OFFSETS[name]
+        angles[f"{name}_splay"] = _compress_splay_angle(-zeroed, name)
+
+    debug_msg = (
+        f"\r[Splay v2] "
+        f"I:{angles['index_splay']:.1f}° "
+        f"M:{angles['middle_splay']:.1f}° "
+        f"R:{angles['ring_splay']:.1f}° "
+        f"P:{angles['pinky_splay']:.1f}°"
+    )
+    if pinky_v_f_2d is not None:
+        debug_msg += f" | pinky_v_f_2d: [{pinky_v_f_2d[0]:.2f}, {pinky_v_f_2d[1]:.2f}]"
+    print(debug_msg, end="", flush=True)
+    return angles
 
 
 def finger_splay_angles(landmarks) -> dict[str, float]:

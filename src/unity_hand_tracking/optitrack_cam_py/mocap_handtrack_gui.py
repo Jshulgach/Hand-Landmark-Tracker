@@ -102,11 +102,11 @@ else:
 
 try:
     from handtrack.processing import (
-        SPLAY_REFERENCE_2D,
+        SPLAY_REF_STORE,
         build_smoother_factories,
         finger_bend_angles,
-        finger_splay_angles,
-        set_splay_reference,
+        finger_splay_angles_v2,
+        set_splay_zero,
     )
 except ImportError:
     from pathlib import Path
@@ -115,11 +115,11 @@ except ImportError:
     if str(_src_root) not in sys.path:
         sys.path.insert(0, str(_src_root))
     from handtrack.processing import (
-        SPLAY_REFERENCE_2D,
+        SPLAY_REF_STORE,
         build_smoother_factories,
         finger_bend_angles,
-        finger_splay_angles,
-        set_splay_reference,
+        finger_splay_angles_v2,
+        set_splay_zero,
     )
 
 
@@ -969,22 +969,22 @@ class StereoHandTrackerGUI(QMainWindow):
     # Tracking start / stop
     # ------------------------------------------------------------------ #
     def calibrate_splay_bias(self):
-        """Capture the current projected MCP→TIP directions as splay references."""
+        """Capture current splay angles as zero offsets (v2 method)."""
         landmarks = getattr(self, "_last_splay_landmarks", None)
         if landmarks is None:
             self.splay_bias_label.setText("No data — start tracking first.")
             return
-        refs = set_splay_reference(landmarks)
-        if refs is None:
-            self.splay_bias_label.setText("Reference failed — invalid palm frame.")
+        offsets = set_splay_zero(landmarks)
+        if offsets is None:
+            self.splay_bias_label.setText("Zero failed — invalid palm frame.")
             return
-        self.splay_bias_label.setText("Reference — captured")
+        self.splay_bias_label.setText("Zero — captured")
         print(
-            "\n[Splay Reference] Captured — "
-            f"I:{refs['index'][0]:.2f},{refs['index'][1]:.2f} "
-            f"M:{refs['middle'][0]:.2f},{refs['middle'][1]:.2f} "
-            f"R:{refs['ring'][0]:.2f},{refs['ring'][1]:.2f} "
-            f"P:{refs['pinky'][0]:.2f},{refs['pinky'][1]:.2f}"
+            "\n[Splay Zero] Captured — "
+            f"I:{offsets['index']:.1f}° "
+            f"M:{offsets['middle']:.1f}° "
+            f"R:{offsets['ring']:.1f}° "
+            f"P:{offsets['pinky']:.1f}°"
         )
 
     def toggle_tracking(self):
@@ -1194,7 +1194,7 @@ class StereoHandTrackerGUI(QMainWindow):
                 if tracked_label == "None":
                     tracked_label = hand_label
                 joint_angles = finger_bend_angles(landmarks_array)
-                splay_angles = finger_splay_angles(landmarks_array)
+                splay_angles = finger_splay_angles_v2(landmarks_array)
                 joint_angles.update(splay_angles)
                 if hand_idx == 0:
                     self._last_splay_landmarks = np.array(landmarks_array, copy=True)
@@ -1606,10 +1606,9 @@ class StereoHandTrackerGUI(QMainWindow):
             for vname, (ox, oy, vw, vh) in view_rects.items():
                 draw_skeleton(vname, ox, oy, vw, vh, hand_landmarks)
 
-            # --- Splay reference vectors ---
-            # Draw the stored splay reference vectors (captured on button press)
-            # and the current projected v_f vectors using the same palm-plane
-            # coordinate system as finger_splay_angles.
+            # --- Splay reference vectors (v2) ---
+            # Reference: wrist (idx 0) → middle_tip (idx 12) — shared for all fingers.
+            # Per-finger v_f: wrist → that finger's tip, matching finger_splay_angles_v2.
             lm = np.array(hand_landmarks, dtype=float)
             _u = lm[5] - lm[17]
             _v = lm[9] - lm[0]
@@ -1641,55 +1640,48 @@ class StereoHandTrackerGUI(QMainWindow):
                     def _from_palm_xy(_vec2):
                         return _vec2[0] * _ex + _vec2[1] * _ey
 
-                    _finger_vectors = {
-                        "index": (5, 8),
-                        "middle": (9, 12),
-                        "ring": (13, 16),
-                        "pinky": (17, 20),
+                    _wrist = lm[0]
+                    _finger_tips_v2 = {
+                        "index": 8,
+                        "middle": 12,
+                        "ring": 16,
+                        "pinky": 20,
                     }
-                    REF_COLOR = (255, 255, 255)  # white
-                    VF_COLOR = (70, 70, 70)  # dark gray
+                    REF_COLOR = (255, 255, 255)  # white dotted = shared reference
+                    VF_COLOR = (70, 70, 70)  # dark gray solid = per-finger v_f
                     DOT_SPACING = 4
 
-                    for _fname, (_mcp_idx, _tip_idx) in _finger_vectors.items():
-                        _mcp = lm[_mcp_idx]
-                        _tip = lm[_tip_idx]
-                        if np.linalg.norm(_mcp) < 1e-3 or np.linalg.norm(_tip) < 1e-3:
-                            continue
-
-                        _v_f_2d = _to_palm_xy(_tip - _mcp)
-                        _vf_norm = np.linalg.norm(_v_f_2d)
-                        if _vf_norm < 1e-6:
-                            continue
-                        _v_f_2d[1] = abs(_v_f_2d[1])
-                        _v_f = _from_palm_xy(_v_f_2d)
-
-                        _stored_ref_2d = SPLAY_REFERENCE_2D.get(_fname)
-                        if _stored_ref_2d is None:
-                            _ref_2d = _v_f_2d.copy()
+                    # Shared reference: use frozen reference if set, else current wrist→middle_tip.
+                    _stored_ref_2d = SPLAY_REF_STORE["unit_2d"]
+                    if _stored_ref_2d is not None:
+                        _v_ref_2d = np.array(_stored_ref_2d, dtype=float)
+                        _v_ref_norm = np.linalg.norm(_v_ref_2d)
+                        if _v_ref_norm > 1e-6:
+                            _v_ref_2d = _v_ref_2d / _v_ref_norm
                         else:
-                            _ref_2d = np.array(_stored_ref_2d, dtype=float)
-                        _ref = _from_palm_xy(_ref_2d)
+                            _v_ref_2d = None
+                    else:
+                        _v_ref_2d = _to_palm_xy(lm[12] - _wrist)
+                        _v_ref_norm = np.linalg.norm(_v_ref_2d)
+                        if _v_ref_norm > 1e-6:
+                            _v_ref_2d = _v_ref_2d / _v_ref_norm
+                        else:
+                            _v_ref_2d = None
 
-                        _ref_norm = np.linalg.norm(_ref)
-                        _v_f_norm = np.linalg.norm(_v_f)
-                        if _ref_norm < 1e-6 or _v_f_norm < 1e-6:
-                            continue
-                        _ref = _ref / _ref_norm
-                        _v_f = _v_f / _v_f_norm
+                    if _v_ref_2d is not None:
+                        # Scale the reference arrow to the middle_tip projection length.
+                        _ref_proj_len = np.linalg.norm(_to_palm_xy(lm[12] - _wrist))
+                        _ref_3d = _from_palm_xy(_v_ref_2d)
+                        _ref_tip_pt = _wrist + _ref_3d * _ref_proj_len
 
-                        _proj_len = np.linalg.norm(_to_palm_xy(_tip - _mcp))
-                        _ref_tip = _mcp + _ref * _proj_len
-                        _vf_tip = _mcp + _v_f * _proj_len
-
+                        # Draw the single white dotted reference arrow once per view.
                         for vname, (ox, oy, vw, vh) in view_rects.items():
                             cx = ox + vw // 2
                             cy = oy + vh // 2
-
-                            u1, v1 = project_point(_mcp - centroid, vname, cx, cy)
-
-                            # Dotted white reference arrow.
-                            u2, v2 = project_point(_ref_tip - centroid, vname, cx, cy)
+                            u1, v1 = project_point(_wrist - centroid, vname, cx, cy)
+                            u2, v2 = project_point(
+                                _ref_tip_pt - centroid, vname, cx, cy
+                            )
                             dx, dy = u2 - u1, v2 - v1
                             seg_len = max(1, int(np.hypot(dx, dy)))
                             n_dots = max(2, seg_len // DOT_SPACING)
@@ -1704,13 +1696,30 @@ class StereoHandTrackerGUI(QMainWindow):
                                 )
                             cv2.circle(canvas, (u2, v2), 2, REF_COLOR, -1)
 
-                            if self.show_splay_vf_vectors:
-                                # Solid dark-gray projected v_f arrow.
-                                u3, v3 = project_point(
-                                    _vf_tip - centroid, vname, cx, cy
-                                )
-                                cv2.line(canvas, (u1, v1), (u3, v3), VF_COLOR, 1)
-                                cv2.circle(canvas, (u3, v3), 2, VF_COLOR, -1)
+                        # Per-finger v_f arrows: wrist → each finger's tip (toggleable).
+                        if self.show_splay_vf_vectors:
+                            for _fname, _tip_idx in _finger_tips_v2.items():
+                                _tip = lm[_tip_idx]
+                                if np.linalg.norm(_tip) < 1e-3:
+                                    continue
+                                _v_f_2d = _to_palm_xy(_tip - _wrist)
+                                _vf_norm = np.linalg.norm(_v_f_2d)
+                                if _vf_norm < 1e-6:
+                                    continue
+                                _v_f_3d = _from_palm_xy(_v_f_2d / _vf_norm)
+                                _vf_tip_pt = _wrist + _v_f_3d * _vf_norm
+
+                                for vname, (ox, oy, vw, vh) in view_rects.items():
+                                    cx = ox + vw // 2
+                                    cy = oy + vh // 2
+                                    u1, v1 = project_point(
+                                        _wrist - centroid, vname, cx, cy
+                                    )
+                                    u3, v3 = project_point(
+                                        _vf_tip_pt - centroid, vname, cx, cy
+                                    )
+                                    cv2.line(canvas, (u1, v1), (u3, v3), VF_COLOR, 1)
+                                    cv2.circle(canvas, (u3, v3), 2, VF_COLOR, -1)
             # --- End splay reference vectors ---
 
             if self.show_raw_filtered_overlay and idx < len(raw_hands):
