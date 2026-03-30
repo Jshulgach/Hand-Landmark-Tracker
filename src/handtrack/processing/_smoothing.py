@@ -190,6 +190,16 @@ def finger_bend_angles(landmarks):
         )
     angles["thumb_cmc_mcp"] = joint_angle(landmarks[1], landmarks[2], landmarks[3])
     angles["thumb_ip"] = joint_angle(landmarks[2], landmarks[3], landmarks[4])
+    print(
+        "\r[Bend MCP] "
+        f"Th:{angles['thumb_cmc_mcp']:.1f}° "
+        f"I:{angles['index_mcp']:.1f}° "
+        f"M:{angles['middle_mcp']:.1f}° "
+        f"R:{angles['ring_mcp']:.1f}° "
+        f"P:{angles['pinky_mcp']:.1f}°",
+        end="",
+        flush=True,
+    )
     return angles
 
 

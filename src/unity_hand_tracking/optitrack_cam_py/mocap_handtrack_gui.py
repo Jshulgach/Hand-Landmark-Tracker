@@ -152,7 +152,7 @@ def _preload_mediapipe_runtime() -> tuple[bool, str]:
 class StereoHandTrackerGUI(QMainWindow):
     """Main window with multi-camera display and control panel."""
 
-    def __init__(self):
+    def __init__(self, calc_splay: bool = False):
         super().__init__()
         self._mediapipe_ready = _MP_PRELOAD_OK
         self._mediapipe_error = _MP_PRELOAD_ERROR
@@ -169,6 +169,7 @@ class StereoHandTrackerGUI(QMainWindow):
         self.show_3d_side = False
         self.show_3d_iso = True
         self.show_3d_palm = False
+        self.calc_splay = bool(calc_splay)
         self.show_splay_vf_vectors = True
         self.frame_count = 0
         self.max_hands = MAX_HANDS
@@ -480,6 +481,10 @@ class StereoHandTrackerGUI(QMainWindow):
             lambda c: setattr(self, "show_splay_vf_vectors", c)
         )
         splay_layout.addWidget(self.splay_vf_checkbox)
+        self.splay_calib_btn.setEnabled(self.calc_splay)
+        self.splay_vf_checkbox.setEnabled(self.calc_splay)
+        if not self.calc_splay:
+            self.splay_bias_label.setText("Disabled (--calc_splay false)")
         layout.addWidget(splay_group)
         # ---- Smoothing / Jitter ----
         smooth_group = QGroupBox("Smoothing")
@@ -796,7 +801,9 @@ class StereoHandTrackerGUI(QMainWindow):
             self.broadcaster = UDPBroadcaster(
                 self.udp_ip, self.udp_port_landmarks, self.udp_port_angles
             )
-            self.lsl_broadcaster = LSLBroadcaster(stream_name="StereoHandTracker")
+            self.lsl_broadcaster = LSLBroadcaster(
+                stream_name="StereoHandTracker", include_splay=self.calc_splay
+            )
             self.udp_status.setText("Broadcasting: Active (UDP+LSL)")
             self.udp_status.setStyleSheet("color: #44ff44;")
             # Print LSL stream info
@@ -810,12 +817,13 @@ class StereoHandTrackerGUI(QMainWindow):
             print("  - Sample Rate: Irregular (0 Hz)")
             print("\nAngles Stream: StereoHandTracker_Angles")
             print("  - Type: MOCAP")
+            angle_keys = getattr(self.lsl_broadcaster, "angle_keys", ANGLE_NAMES)
             print(
-                f"  - Channels: {2 * len(ANGLE_NAMES)} (2 hands × {len(ANGLE_NAMES)} angles)"
+                f"  - Channels: {2 * len(angle_keys)} (2 hands × {len(angle_keys)} angles)"
             )
             print("  - Format: float32")
             print("  - Sample Rate: Irregular (0 Hz)")
-            print(f"  - Angle Names: {ANGLE_NAMES}")
+            print(f"  - Angle Names: {angle_keys}")
             print("=" * 70 + "\n")
             self._debug_stream_logged = False
         except Exception as e:
@@ -970,6 +978,9 @@ class StereoHandTrackerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     def calibrate_splay_bias(self):
         """Capture current splay angles as zero offsets (v2 method)."""
+        if not self.calc_splay:
+            self.splay_bias_label.setText("Splay disabled")
+            return
         landmarks = getattr(self, "_last_splay_landmarks", None)
         if landmarks is None:
             self.splay_bias_label.setText("No data — start tracking first.")
@@ -1091,7 +1102,7 @@ class StereoHandTrackerGUI(QMainWindow):
             if self.lsl_broadcaster is None:
                 try:
                     self.lsl_broadcaster = LSLBroadcaster(
-                        stream_name="StereoHandTracker"
+                        stream_name="StereoHandTracker", include_splay=self.calc_splay
                     )
                 except Exception as e:
                     print(f"Error initializing LSL broadcaster: {e}")
@@ -1194,10 +1205,11 @@ class StereoHandTrackerGUI(QMainWindow):
                 if tracked_label == "None":
                     tracked_label = hand_label
                 joint_angles = finger_bend_angles(landmarks_array)
-                splay_angles = finger_splay_angles_v2(landmarks_array)
-                joint_angles.update(splay_angles)
-                if hand_idx == 0:
-                    self._last_splay_landmarks = np.array(landmarks_array, copy=True)
+                if self.calc_splay:
+                    splay_angles = finger_splay_angles_v2(landmarks_array)
+                    joint_angles.update(splay_angles)
+                    if hand_idx == 0:
+                        self._last_splay_landmarks = np.array(landmarks_array, copy=True)
 
                 # # -- Comment if unecessary or bad lol --#
                 if self.apply_kalman and hand_idx < len(self.angle_kalman_filters):
@@ -1772,7 +1784,15 @@ def main():
             pass  # Non-critical — just means we run at normal priority
 
     parser = argparse.ArgumentParser(description="Stereo Hand Tracker")
-    parser.parse_args()
+    parser.add_argument(
+        "--calc_splay",
+        type=lambda v: str(v).strip().lower() in ("1", "true", "t", "yes", "y", "on"),
+        nargs="?",
+        const=True,
+        default=False,
+        help="Enable splay-angle computation and streaming (default: False).",
+    )
+    args = parser.parse_args()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     palette = app.palette()
@@ -1789,7 +1809,7 @@ def main():
     palette.setColor(QPalette.Highlight, QColor(0, 120, 212))
     palette.setColor(QPalette.HighlightedText, Qt.black)
     app.setPalette(palette)
-    window = StereoHandTrackerGUI()
+    window = StereoHandTrackerGUI(calc_splay=args.calc_splay)
     window.show()
     sys.exit(app.exec_())
 

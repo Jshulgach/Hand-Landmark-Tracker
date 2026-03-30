@@ -164,7 +164,7 @@ MIN_CAMERAS_FOR_TRIANGULATION = 2
 # Maximum reprojection error for valid triangulation (in pixels)
 # Used by RANSAC to classify inlier vs outlier cameras, and to detect
 # occluded thumbs (if error > this, the camera is dropped for that landmark)
-MAX_REPROJECTION_ERROR = 17.5
+MAX_REPROJECTION_ERROR = 19
 
 # Method for combining multiple camera views
 # 'ransac' - RANSAC outlier rejection + N-view DLT (RECOMMENDED for 3+ cameras)

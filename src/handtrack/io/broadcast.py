@@ -92,7 +92,12 @@ class UDPBroadcaster(DataBroadcaster):
 class LSLBroadcaster(DataBroadcaster):
     """Broadcasts data via Lab Streaming Layer (LSL)."""
 
-    def __init__(self, stream_name="HandTracker", source_id="hand_tracker_01"):
+    def __init__(
+        self,
+        stream_name="HandTracker",
+        source_id="hand_tracker_01",
+        include_splay=True,
+    ):
         super().__init__()
         if not LSL_AVAILABLE:
             print("Warning: pylsl not installed. LSL broadcasting will be disabled.")
@@ -129,6 +134,7 @@ class LSLBroadcaster(DataBroadcaster):
 
         # 2. Angles Stream
         # Fixed channel count based on canonical angle order below.
+        self.include_splay = bool(include_splay)
         self.angle_keys = [
             "thumb_cmc_mcp",
             "thumb_ip",
@@ -144,11 +150,11 @@ class LSLBroadcaster(DataBroadcaster):
             "pinky_mcp",
             "pinky_pip",
             "pinky_dip",
-            "index_splay",
-            "middle_splay",
-            "ring_splay",
-            "pinky_splay",
         ]
+        if self.include_splay:
+            self.angle_keys.extend(
+                ["index_splay", "middle_splay", "ring_splay", "pinky_splay"]
+            )
         n_channels_ang = 2 * len(self.angle_keys)
         info_ang = StreamInfo(
             f"{stream_name}_Angles",

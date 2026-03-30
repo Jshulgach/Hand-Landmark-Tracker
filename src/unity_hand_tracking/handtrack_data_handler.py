@@ -3,8 +3,26 @@ Angle Forwarder: Receives joint angles from the hand tracker's UDP broadcaster
 and forwards them to Unity in a 78-element comma-separated format.
 """
 
+import argparse
 import json
 import socket
+
+
+def _parse_bool(v):
+    return str(v).strip().lower() in ("1", "true", "t", "yes", "y", "on")
+
+
+parser = argparse.ArgumentParser(description="Forward hand tracker angles to Unity")
+parser.add_argument(
+    "--include_splay",
+    type=_parse_bool,
+    nargs="?",
+    const=True,
+    default=False,
+    help="Forward splay angles to Unity (default: False).",
+)
+args, _ = parser.parse_known_args()
+INCLUDE_SPLAY = bool(args.include_splay)
 
 # --- Config ---
 UDP_IP = "127.0.0.1"
@@ -52,6 +70,7 @@ finger_splay_names = {
 
 print(f"FORWARDER: Listening on {UDP_IP}:{UDP_PORT}")
 print(f"FORWARDER: Sending FINGERS ONLY to Unity {UNITY_IP}:{UNITY_PORT}")
+print(f"FORWARDER: Include splay forwarding: {INCLUDE_SPLAY}")
 print("Waiting for tracker data...\n")
 
 
@@ -71,7 +90,7 @@ def map_tracker_to_unity(tracker_angles):
                 data_list[joint_idx] = str(round(val, 4))
 
         # --- Splay: write to Y slot of metacarpal (comment out to disable) ---
-        if finger in finger_splay_names:
+        if INCLUDE_SPLAY and finger in finger_splay_names:
             splay_name = finger_splay_names[finger]
             if splay_name in tracker_angles:
                 metacarpal_y_slot = start_idx * 3 + 1  # Y slot of bone 0
@@ -83,6 +102,14 @@ def map_tracker_to_unity(tracker_angles):
         # --- End splay ---
 
     return ",".join(data_list)
+
+
+def _angle_or_nan(angles, key):
+    val = angles.get(key, float("nan"))
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return float("nan")
 
 
 # --- Main Loop ---
@@ -136,6 +163,17 @@ try:
 
                 unity_message = map_tracker_to_unity(angles)
                 unity_sock.sendto(unity_message.encode("utf-8"), (UNITY_IP, UNITY_PORT))
+
+                print(
+                    "\r[Forwarded MCP] "
+                    f"Th:{_angle_or_nan(angles, 'thumb_cmc_mcp'):.1f}° "
+                    f"I:{_angle_or_nan(angles, 'index_mcp'):.1f}° "
+                    f"M:{_angle_or_nan(angles, 'middle_mcp'):.1f}° "
+                    f"R:{_angle_or_nan(angles, 'ring_mcp'):.1f}° "
+                    f"P:{_angle_or_nan(angles, 'pinky_mcp'):.1f}°",
+                    end="",
+                    flush=True,
+                )
 
                 frame_count += 1
                 if frame_count % 30 == 0:
