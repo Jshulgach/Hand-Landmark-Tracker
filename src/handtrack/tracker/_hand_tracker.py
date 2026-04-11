@@ -33,6 +33,7 @@ class HandTracker:
         """
         self.source = source
         self.img_size = img_size
+        self.max_hands = max(1, int(max_hands))
         self.apply_kalman = apply_kalman
         self.save_angles = save_angles
         self.out_path = out_path
@@ -52,13 +53,13 @@ class HandTracker:
 
         # Initialize MediaPipe Hands
         self.hands = mp.solutions.hands.Hands(
-            max_num_hands=max_hands,
+            max_num_hands=self.max_hands,
             min_detection_confidence=confidence,
             min_tracking_confidence=0.8
         )
 
         # Initialize filters and state
-        self.kalman_filters = [Kalman3D(process_noise=1e-3, measurement_noise=1e-4) for _ in range(21)]
+        self.kalman_filters = self._create_filter_bank()
         self.joint_log = []  # to store angle data
         self.last_angles = None  # For histogram
         self.landmarks_filtered = None  # Store filtered landmarks for visualization
@@ -101,7 +102,6 @@ class HandTracker:
         if visualize:
             print(F"visualize: {visualize}, save_video: {save_video}")
 
-        raw_landmarks = []
         smooth_landmarks = []
         frame_idx = 0
         while self.cap.isOpened():
@@ -112,20 +112,9 @@ class HandTracker:
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(rgb)
-            if results and results.multi_hand_landmarks:
-                landmarks = results.multi_hand_landmarks[0]
-                landmark_array = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-            else:
-                landmark_array = np.zeros((21, 3))
-
-            raw_landmarks.append(landmark_array)
-
-            # Apply Kalman filtering if enabled
-            if self.apply_kalman:
-                filtered_frame = [self.kalman_filters[i].update(landmark_array[i]) for i in range(21)]
-                smooth_landmarks.append(filtered_frame)
-            else:
-                smooth_landmarks.append(landmark_array)
+            landmarks = results.multi_hand_landmarks[:self.max_hands] if results and results.multi_hand_landmarks else []
+            _, filtered_frame, detected_count = self._prepare_landmarks(landmarks)
+            smooth_landmarks.append(self._format_landmarks(filtered_frame.copy()))
 
             # Compute joint angles
             #angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
@@ -134,14 +123,15 @@ class HandTracker:
 
             if visualize or save_video:
                 # Draw landmarks on the frame
-                if results.multi_hand_landmarks:
+                for hand in landmarks:
                     mp.solutions.drawing_utils.draw_landmarks(
-                        frame, results.multi_hand_landmarks[0], mp.solutions.hands.HAND_CONNECTIONS
+                        frame, hand, mp.solutions.hands.HAND_CONNECTIONS
                     )
 
                 if self.apply_kalman:
-                    for x, y, _ in filtered_frame:
-                        cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, (255, 255, 255), -1)
+                    for hand_idx in range(detected_count):
+                        for x, y, _ in filtered_frame[hand_idx]:
+                            cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, (255, 255, 255), -1)
 
                 # Show the frame index on the frame
                 cv2.putText(frame, f"Frame: {frame_idx + 1}/{total_frames}", (10, 30),
@@ -165,16 +155,70 @@ class HandTracker:
         if visualize:
             cv2.destroyAllWindows()
 
-        #landmarks_np = np.array(raw_landmarks)
-        landmarks_np = smooth_landmarks
+        if smooth_landmarks:
+            landmarks_np = np.asarray(smooth_landmarks, dtype=np.float32)
+        else:
+            if self.max_hands == 1:
+                landmarks_np = np.zeros((0, 21, 3), dtype=np.float32)
+            else:
+                landmarks_np = np.zeros((0, self.max_hands, 21, 3), dtype=np.float32)
+
+        processed_frames = int(landmarks_np.shape[0])
         metadata = {
             'sampling_rate': fps,
-            'total_frames': total_frames,
+            'total_frames': processed_frames,
             'landmark_labels': [lm.name for lm in mp.solutions.hands.HandLandmark],
-            'time_vector': np.arange(total_frames) / fps
+            'time_vector': np.arange(processed_frames, dtype=np.float32) / fps
         }
 
         return landmarks_np, metadata
+
+    def _create_filter_bank(self):
+        return [
+            [Kalman3D(process_noise=1e-3, measurement_noise=1e-4) for _ in range(21)]
+            for _ in range(self.max_hands)
+        ]
+
+    def _empty_landmarks(self):
+        return np.zeros((self.max_hands, 21, 3), dtype=np.float32)
+
+    def _format_landmarks(self, landmark_batch):
+        if self.max_hands == 1:
+            return landmark_batch[0]
+        return landmark_batch
+
+    def _primary_landmarks(self, landmarks=None):
+        if landmarks is None:
+            landmarks = self.landmarks_filtered
+        if landmarks is None:
+            return None
+        if self.max_hands == 1:
+            return landmarks
+        for hand_landmarks in landmarks:
+            if np.any(hand_landmarks):
+                return hand_landmarks
+        return None
+
+    def _prepare_landmarks(self, detected_hands):
+        raw_landmarks = self._empty_landmarks()
+        detected_count = 0
+
+        for hand_idx, hand in enumerate((detected_hands or [])[:self.max_hands]):
+            raw_landmarks[hand_idx] = np.array(
+                [[lm.x, lm.y, lm.z] for lm in hand.landmark],
+                dtype=np.float32,
+            )
+            detected_count += 1
+
+        filtered_landmarks = raw_landmarks.copy()
+        if self.apply_kalman:
+            for hand_idx in range(detected_count):
+                filtered_landmarks[hand_idx] = np.array(
+                    [self.kalman_filters[hand_idx][i].update(raw_landmarks[hand_idx][i]) for i in range(21)],
+                    dtype=np.float32,
+                )
+
+        return raw_landmarks, filtered_landmarks, detected_count
 
     def reset_filters(self):
         """
@@ -187,7 +231,7 @@ class HandTracker:
             None
 
         """
-        self.kalman_filters = [Kalman3D(process_noise=1e-3, measurement_noise=1e-4) for _ in range(21)]
+        self.kalman_filters = self._create_filter_bank()
 
     def get_image(self, flip_frame=False):
         success, frame = self.cap.read()
@@ -215,10 +259,10 @@ class HandTracker:
 
             landmarks = self.detect_hands(frame)
             if landmarks:
-                landmarks_raw = np.array([[lm.x, lm.y, lm.z] for lm in landmarks[0].landmark])
-                self.landmarks_filtered = np.array([
-                    self.kalman_filters[i].update(landmarks_raw[i]) for i in range(21)
-                ])
+                _, filtered_landmarks, _ = self._prepare_landmarks(landmarks)
+                self.landmarks_filtered = self._format_landmarks(filtered_landmarks.copy())
+                primary_landmarks = self._primary_landmarks()
+                self.last_angles = compute_all_joint_angles(primary_landmarks) if primary_landmarks is not None else None
 
                 # Compute joint angles
                 #angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
@@ -229,6 +273,9 @@ class HandTracker:
                 #    print(angles)
                 #if self.save_angles:
                 #    self.joint_log.append([time.time()] + list(angles.values()))
+            else:
+                self.landmarks_filtered = None
+                self.last_angles = None
 
             # Show frame index on frame
             cv2.putText(frame, f"Frame: {frame_idx}", (10, 30),
@@ -263,11 +310,15 @@ class HandTracker:
 
         """
         if self.landmarks_filtered is not None and landmarks is not None:
-            for hand in landmarks:
+            for hand in landmarks[:self.max_hands]:
                 mp.solutions.drawing_utils.draw_landmarks(frame, hand, mp.solutions.hands.HAND_CONNECTIONS)
 
-            for x, y, _ in self.landmarks_filtered:
-                cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, (255, 255, 255), -1)
+            filtered_hands = [self.landmarks_filtered] if self.max_hands == 1 else self.landmarks_filtered
+            for hand_landmarks in filtered_hands:
+                if not np.any(hand_landmarks):
+                    continue
+                for x, y, _ in hand_landmarks:
+                    cv2.circle(frame, (int(x * frame.shape[1]), int(y * frame.shape[0])), 4, (255, 255, 255), -1)
 
         if self.last_angles:
             print("drawing histogram")
@@ -354,21 +405,13 @@ class HandTracker:
         """
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb)
-        landmarks = results.multi_hand_landmarks[0] if results.multi_hand_landmarks else None
+        landmarks = results.multi_hand_landmarks[:self.max_hands] if results.multi_hand_landmarks else None
 
-        if landmarks:
-            landmarks_raw = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
-        else:
-            landmarks_raw = np.zeros((21, 3))
+        _, filtered_landmarks, detected_count = self._prepare_landmarks(landmarks)
+        self.landmarks_filtered = self._format_landmarks(filtered_landmarks.copy()) if detected_count else None
 
-        if self.apply_kalman:
-            self.landmarks_filtered = np.array([
-                self.kalman_filters[i].update(landmarks_raw[i]) for i in range(21)
-            ])
-        else:
-            self.landmarks_filtered = landmarks_raw
-
-        angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
+        primary_landmarks = self._primary_landmarks()
+        angles = compute_all_joint_angles(primary_landmarks) if primary_landmarks is not None else None
         self.last_angles = angles
 
         return landmarks, self.landmarks_filtered, angles, results

@@ -4,6 +4,36 @@ Complex examples demonstrating robot control, 3D rendering, and interactive appl
 
 ## Projects
 
+### `stream_finger_angles_udp.py` ⭐
+Drive the printed hand through `embedded_control_station` using live webcam hand tracking.
+
+**Features:**
+- Live MediaPipe hand tracking inside a desktop GUI with an embedded camera view
+- MCP finger-angle extraction using the package kinematics helpers
+- Safe UDP broadcast to `embedded_control_station` using the arm JSON protocol
+- Configurable open/closed calibration and command smoothing
+- Right-side control panel for camera enable or disable, UDP routing, and mapping controls
+- Visual overlay with commanded finger positions
+
+**Usage:**
+```bash
+python stream_finger_angles_udp.py --host 127.0.0.1 --port 9105 --stream-name finger-angles
+```
+
+The script now opens a polished control console inspired by `embedded_control_station`, with the live camera preview on the left and camera or UDP controls on the right.
+
+**Recommended Workflow:**
+1. Start `embedded_control_station` and connect the Pico.
+2. Route the `finger-angles` stream in the Arm Console.
+3. Run this bridge script.
+4. Tune `--thumb-open-angle`, `--thumb-closed-angle`, `--finger-open-angle`, and `--finger-closed-angle` until the printed hand tracks comfortably.
+
+**Notes:**
+- The bridge sends `wrist`, `thumb`, `index`, `middle`, `ring`, and `pinky` targets over UDP.
+- Default command range is `0..140` for safer first motion. Increase `--closed-command` if the hand needs more travel.
+
+---
+
 ### 📁 Miniarm
 Control a Mini-Arm robot gripper using hand tracking as a virtual spacemouse.
 

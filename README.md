@@ -36,8 +36,14 @@ This code uses the amazing features of Google's machine learning suite [MediaPip
    ~~~
 3. Install the required packages.
     ~~~
-    pip install -r requirements.txt
+  pip install -e .
     ~~~
+
+Optional extras are available for feature-specific dependencies:
+~~~
+pip install -e .[stream]
+pip install -e .[io,applications,ml]
+~~~
 
 
 ## Getting Started
@@ -70,7 +76,7 @@ python examples/01_basic_tracking/handtrack_webcam.py
 The HandTracker class can be easily imported and used in your own projects:
 ```python
 from handtrack.tracker import HandTracker
-tracker = HandTracker(visualize=True)  # Enable visualization
+tracker = HandTracker(source=0, max_hands=1)
 tracker.run()
 ```
 

@@ -42,7 +42,7 @@ from pylsl import StreamInfo, StreamOutlet
 import mediapipe as mp
 
 
-def create_lsl_outlet(stream_name="HandLandmarks", num_landmarks=21, fps=30):
+def create_lsl_outlet(stream_name="HandLandmarks", num_landmarks=21, fps=30, max_hands=1):
     """
     Create an LSL outlet for streaming hand landmark data.
     
@@ -50,11 +50,12 @@ def create_lsl_outlet(stream_name="HandLandmarks", num_landmarks=21, fps=30):
         stream_name (str): Name of the LSL stream
         num_landmarks (int): Number of landmarks per hand (default: 21)
         fps (float): Expected sampling rate in Hz
+        max_hands (int): Maximum number of hands encoded into each sample
         
     Returns:
         StreamOutlet: LSL outlet ready to push samples
     """
-    n_channels = num_landmarks * 3  # x, y, z for each landmark
+    n_channels = max_hands * num_landmarks * 3  # x, y, z for each landmark in each hand slot
     
     # Create stream info with detailed metadata
     info = StreamInfo(
@@ -70,16 +71,18 @@ def create_lsl_outlet(stream_name="HandLandmarks", num_landmarks=21, fps=30):
     channels = info.desc().append_child("channels")
     landmark_names = [lm.name for lm in mp.solutions.hands.HandLandmark]
     
-    for i, lm_name in enumerate(landmark_names):
-        for coord in ['x', 'y', 'z']:
-            ch = channels.append_child("channel")
-            ch.append_child_value("label", f"{lm_name}_{coord}")
-            ch.append_child_value("unit", "normalized" if coord in ['x', 'y'] else "depth")
-            ch.append_child_value("type", "Position")
+    for hand_idx in range(max_hands):
+        for lm_name in landmark_names:
+            for coord in ['x', 'y', 'z']:
+                ch = channels.append_child("channel")
+                ch.append_child_value("label", f"hand{hand_idx}_{lm_name}_{coord}")
+                ch.append_child_value("unit", "normalized" if coord in ['x', 'y'] else "depth")
+                ch.append_child_value("type", "Position")
     
     # Add additional metadata
     info.desc().append_child_value("manufacturer", "MediaPipe")
     info.desc().append_child_value("model", "HandLandmarker")
+    info.desc().append_child_value("max_hands", str(max_hands))
     
     # Create and return the outlet
     outlet = StreamOutlet(info, chunk_size=1, max_buffered=360)
@@ -115,7 +118,7 @@ def stream_landmarks(source=0, stream_name="HandLandmarks", max_hands=1,
     )
     
     # Create LSL outlet
-    outlet = create_lsl_outlet(stream_name=stream_name, num_landmarks=21, fps=fps)
+    outlet = create_lsl_outlet(stream_name=stream_name, num_landmarks=21, fps=fps, max_hands=tracker.max_hands)
     
     print("\n" + "="*60)
     print("STREAMING HAND LANDMARKS TO LSL")
@@ -144,27 +147,28 @@ def stream_landmarks(source=0, stream_name="HandLandmarks", max_hands=1,
             # Detect hands
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = tracker.hands.process(rgb)
+            detected_count = 0
+            frame_landmarks = np.zeros((tracker.max_hands, 21, 3), dtype=np.float32)
             
             # Extract and stream landmarks
             if results and results.multi_hand_landmarks:
-                for hand_idx, landmarks in enumerate(results.multi_hand_landmarks):
+                detected_hands = results.multi_hand_landmarks[:tracker.max_hands]
+                detected_count = len(detected_hands)
+
+                for hand_idx, landmarks in enumerate(detected_hands):
                     # Extract raw landmark array
-                    landmark_array = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark])
+                    landmark_array = np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark], dtype=np.float32)
                     
                     # Apply Kalman filtering if enabled
                     if apply_kalman:
                         filtered_landmarks = np.array([
-                            tracker.kalman_filters[i].update(landmark_array[i]) 
+                            tracker.kalman_filters[hand_idx][i].update(landmark_array[i]) 
                             for i in range(21)
-                        ])
+                        ], dtype=np.float32)
                     else:
                         filtered_landmarks = landmark_array
-                    
-                    # Flatten to 1D array (63 values: 21 landmarks × 3 coords)
-                    sample = filtered_landmarks.flatten().tolist()
-                    
-                    # Push to LSL
-                    outlet.push_sample(sample)
+
+                    frame_landmarks[hand_idx] = filtered_landmarks
                     
                     # Visualize if enabled
                     if visualize:
@@ -181,10 +185,9 @@ def stream_landmarks(source=0, stream_name="HandLandmarks", max_hands=1,
                                 cv2.circle(frame, 
                                          (int(x * frame.shape[1]), int(y * frame.shape[0])), 
                                          4, (255, 255, 255), -1)
-            else:
-                # No hands detected - push zeros to maintain timing
-                sample = [0.0] * 63
-                outlet.push_sample(sample)
+
+            sample = frame_landmarks.reshape(-1).tolist()
+            outlet.push_sample(sample)
             
             # Calculate FPS
             fps_counter += 1
@@ -201,7 +204,7 @@ def stream_landmarks(source=0, stream_name="HandLandmarks", max_hands=1,
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 cv2.putText(frame, f"FPS: {current_fps:.1f}", (10, 60),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"Hands: {len(results.multi_hand_landmarks) if results and results.multi_hand_landmarks else 0}", 
+                cv2.putText(frame, f"Hands: {detected_count}/{tracker.max_hands}", 
                            (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 cv2.putText(frame, f"Kalman: {'ON' if apply_kalman else 'OFF'}", (10, 120),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)

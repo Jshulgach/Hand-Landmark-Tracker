@@ -9,8 +9,9 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
+    "numpy>=1.23.5",
     "opencv-python>=4.5.0",
-    "mediapipe>=0.10.9,<0.10.14"
+    "mediapipe>=0.10.9,<0.10.14",
     #"numpy>=1.26.0", # 1.23.5
     "scipy",
     #"pandas",
@@ -32,6 +33,30 @@ dependencies = [
     #"torchvision",
 ]
 
+[project.optional-dependencies]
+io = [
+    "pandas",
+    "PyYAML",
+]
+stream = [
+    "pylsl",
+]
+applications = [
+    "matplotlib",
+]
+ml = [
+    "scikit-learn",
+    "torch",
+]
+all = [
+    "pandas",
+    "PyYAML",
+    "pylsl",
+    "matplotlib",
+    "scikit-learn",
+    "torch",
+]
+
 [project.urls]
 Homepage = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
 Repository = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
@@ -40,14 +65,6 @@ Issues = "https://github.com/Jshulgach/Hand-Landmark-Tracker/issues"
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-
-#[project.optional-dependencies]
-#docs = [
-#    "sphinx",
-#    "sphinx-autodoc-typehints",
-#    "myst-parser",
-#]
 [tool.setuptools]
 package-dir = {"" = "src"}
 

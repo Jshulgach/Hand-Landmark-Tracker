@@ -171,6 +171,20 @@ python 03_streaming/lsl_emg_predict_angles.py
 
 **Complex applications: robot control, virtual hands, and interactive demos**
 
+### `stream_finger_angles_udp.py` ⭐
+Bridge live webcam hand tracking into `embedded_control_station` so the printed hand can be driven over the newer UDP + Pico control path.
+
+```bash
+cd 04_advanced_applications
+python stream_finger_angles_udp.py --host 127.0.0.1 --port 9105
+```
+
+**Features:**
+- Live finger-angle extraction from MediaPipe landmarks
+- UDP arm command broadcasting to `embedded_control_station`
+- Safer default command limits for first hardware tests
+- Per-finger calibration arguments for open/closed hand tuning
+
 ### `Miniarm/`
 Control a Mini-Arm robot gripper using hand tracking as a virtual spacemouse.
 
