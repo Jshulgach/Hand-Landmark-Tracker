@@ -161,7 +161,10 @@ class HandDataSimulator:
         angles_data = []
         for hand_idx in range(self.num_hands):
             angles = self.generate_angles(hand_idx)
-            angles_data.append({"hand_index": hand_idx, "angles": angles})
+            label = "Left" if hand_idx == 0 else "Right"
+            angles_data.append(
+                {"hand_index": hand_idx, "angles": angles, "label": label}
+            )
 
         return self.frame_count, timestamp, landmarks_data, angles_data
 

@@ -31,7 +31,7 @@ This code uses the amazing features of Google's machine learning suite [MediaPip
      ~~~
 2. Clone the repository and navigate to the project directory.
    ~~~
-   git clone https://github.com/Jshulgach/Hand-Landmark-Tracker/unity_tree.git
+  git clone https://github.com/Jshulgach/Hand-Landmark-Tracker.git
    cd Hand-Landmark-Tracker
    ~~~
 3. Install the package (recommended for production-style usage).
@@ -111,6 +111,7 @@ These are kept for reference and backward-compatible experimentation, while acti
   "hands": [
     {
       "hand_index": 0,
+      "label": "Left",
       "angles": {
         "index_mcp": 12.34,
         "index_pip": 45.67,
@@ -125,6 +126,10 @@ These are kept for reference and backward-compatible experimentation, while acti
 14 angles per hand in degrees:
 - Fingers: `{finger}_mcp`, `{finger}_pip`, `{finger}_dip` (index, middle, ring, pinky)
 - Thumb: `thumb_cmc_mcp`, `thumb_ip`
+
+`label` is optional but recommended for left/right routing. If it is omitted, downstream tools fall back to `hand_index` for compatibility with older senders.
+
+When using `src/unity_hand_tracking/handtrack_data_handler.py`, the Unity listeners are expected on UDP ports `5015` (left hand) and `5017` (right hand).
 
 
 **Features:**

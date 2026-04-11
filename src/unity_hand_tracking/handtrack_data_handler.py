@@ -7,6 +7,19 @@ import argparse
 import json
 import socket
 
+try:
+    from unity_hand_tracking._routing import (
+        DEFAULT_UNITY_PORT_LEFT,
+        DEFAULT_UNITY_PORT_RIGHT,
+        resolve_unity_target,
+    )
+except ImportError:
+    from _routing import (
+        DEFAULT_UNITY_PORT_LEFT,
+        DEFAULT_UNITY_PORT_RIGHT,
+        resolve_unity_target,
+    )
+
 
 def _parse_bool(v):
     return str(v).strip().lower() in ("1", "true", "t", "yes", "y", "on")
@@ -28,7 +41,8 @@ INCLUDE_SPLAY = bool(args.include_splay)
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5010  # Tracker broadcasts angles here
 UNITY_IP = "127.0.0.1"
-UNITY_PORT = 5015  # Unity listens here
+UNITY_PORT_LEFT = DEFAULT_UNITY_PORT_LEFT  # Unity listens for left hand here
+UNITY_PORT_RIGHT = DEFAULT_UNITY_PORT_RIGHT  # Unity listens for right hand here
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -69,7 +83,8 @@ finger_splay_names = {
 
 
 print(f"FORWARDER: Listening on {UDP_IP}:{UDP_PORT}")
-print(f"FORWARDER: Sending FINGERS ONLY to Unity {UNITY_IP}:{UNITY_PORT}")
+print(f"FORWARDER: Sending LEFT hand to Unity {UNITY_IP}:{UNITY_PORT_LEFT}")
+print(f"FORWARDER: Sending RIGHT hand to Unity {UNITY_IP}:{UNITY_PORT_RIGHT}")
 print(f"FORWARDER: Include splay forwarding: {INCLUDE_SPLAY}")
 print("Waiting for tracker data...\n")
 
@@ -157,23 +172,29 @@ try:
                 first_packet = False
 
             if hand_list:
-                # Take the first hand (hand_index 0, or whatever is first)
-                first_hand = hand_list[0]
-                angles = first_hand.get("angles", {})
+                for hand in hand_list:
+                    angles = hand.get("angles", {})
+                    unity_port, hand_name = resolve_unity_target(
+                        hand,
+                        left_port=UNITY_PORT_LEFT,
+                        right_port=UNITY_PORT_RIGHT,
+                    )
 
-                unity_message = map_tracker_to_unity(angles)
-                unity_sock.sendto(unity_message.encode("utf-8"), (UNITY_IP, UNITY_PORT))
+                    unity_message = map_tracker_to_unity(angles)
+                    unity_sock.sendto(
+                        unity_message.encode("utf-8"), (UNITY_IP, unity_port)
+                    )
 
-                print(
-                    "\r[Forwarded MCP] "
-                    f"Th:{_angle_or_nan(angles, 'thumb_cmc_mcp'):.1f}° "
-                    f"I:{_angle_or_nan(angles, 'index_mcp'):.1f}° "
-                    f"M:{_angle_or_nan(angles, 'middle_mcp'):.1f}° "
-                    f"R:{_angle_or_nan(angles, 'ring_mcp'):.1f}° "
-                    f"P:{_angle_or_nan(angles, 'pinky_mcp'):.1f}°",
-                    end="",
-                    flush=True,
-                )
+                    print(
+                        f"\r[Forwarded {hand_name} MCP] "
+                        f"Th:{_angle_or_nan(angles, 'thumb_cmc_mcp'):.1f}° "
+                        f"I:{_angle_or_nan(angles, 'index_mcp'):.1f}° "
+                        f"M:{_angle_or_nan(angles, 'middle_mcp'):.1f}° "
+                        f"R:{_angle_or_nan(angles, 'ring_mcp'):.1f}° "
+                        f"P:{_angle_or_nan(angles, 'pinky_mcp'):.1f}° → :{unity_port}",
+                        end="",
+                        flush=True,
+                    )
 
                 frame_count += 1
                 if frame_count % 30 == 0:

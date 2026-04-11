@@ -1234,7 +1234,7 @@ class StereoHandTrackerGUI(QMainWindow):
                     # )
                 out_index = 0 if self.remap_selected_hand else selected_idx
                 hand_angle_packets.append(
-                    {"hand_index": out_index, "angles": joint_angles}
+                    {"hand_index": out_index, "angles": joint_angles, "label": hand_label}
                 )
                 selected_idx += 1
                 if hand_idx == 0:
