@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "handtrack"
-version = "0.0.3.10"
+version = "0.1.0"
 description = "Hand landmark tracking, triangulation, kinematics, and streaming toolkit"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Jonathan Shulgach", email = "jshulgac@andrew.cmu.edu" }]
 keywords = ["hand-tracking", "mediapipe", "optitrack", "kinematics", "lsl"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -37,14 +37,20 @@ gui = ["PyQt5>=5.15", "pyqtgraph>=0.13"]
 lsl = ["pylsl>=1.16"]
 optitrack = ["psutil>=5.9"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+release = ["build>=1.2", "twine>=5.1"]
 
 [project.urls]
 Homepage = "https://github.com/jshulgach/Hand-Landmark-Tracker"
 Repository = "https://github.com/jshulgach/Hand-Landmark-Tracker"
 Issues = "https://github.com/jshulgach/Hand-Landmark-Tracker/issues"
+Documentation = "https://jshulgach.github.io/Hand-Landmark-Tracker/"
+Changelog = "https://github.com/jshulgach/Hand-Landmark-Tracker/blob/main/CHANGELOG.md"
 
 [project.scripts]
+handtracker = "handtrack.applications._cli:main"
 handtrack-doctor = "handtrack.applications._doctor:main"
+handtrack-inspect-calibration = "handtrack.applications._inspect_calibration:main"
 handtrack-optitrack-gui = "unity_hand_tracking.optitrack_cam_py.mocap_handtrack_gui:main"
 handtrack-optitrack-calibrate = "unity_hand_tracking.optitrack_cam_py.calibration:main"
 handtrack-optitrack-board = "unity_hand_tracking.optitrack_cam_py.generate_charuco_board:main"
@@ -57,3 +63,7 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["handtrack*", "unity_hand_tracking*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,48 @@
+site_name: HandTrack
+site_description: Hand landmark tracking, calibration, and streaming toolkit.
+site_url: https://jshulgach.github.io/Hand-Landmark-Tracker/
+repo_url: https://github.com/jshulgach/Hand-Landmark-Tracker
+repo_name: Jshulgach/Hand-Landmark-Tracker
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  logo: source/_static/hand-landmarks.png
+  favicon: source/_static/hand-landmarks.png
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: cyan
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: cyan
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - CLI: cli.md
+  - Backends: backends.md
+  - Troubleshooting: troubleshooting.md
+  - Releases: releases.md

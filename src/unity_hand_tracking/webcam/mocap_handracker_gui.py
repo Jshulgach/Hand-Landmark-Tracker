@@ -133,10 +133,16 @@ def _preload_mediapipe_runtime() -> tuple[bool, str]:
     This reduces Windows DLL initialization conflicts that can appear when
     `_framework_bindings` is imported later in the session.
     """
-    if _MP_PRELOAD_OK:
-        return True, ""
     try:
-        importlib.import_module("mediapipe")
+        mp = importlib.import_module("mediapipe")
+
+        if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "hands"):
+            version = getattr(mp, "__version__", "unknown")
+            return (
+                False,
+                "Installed mediapipe package does not expose the legacy Hands API "
+                f"(found version {version}). Install `mediapipe==0.10.14`.",
+            )
         return True, ""
     except Exception as exc:
         return False, str(exc)
@@ -1006,7 +1012,8 @@ class StereoHandTrackerGUI(QMainWindow):
                     msg = (
                         "MediaPipe preload failed. "
                         "Try running from PowerShell/CMD (not MINGW/MSYS), "
-                        "and ensure VC++ Redistributable 2015-2022 is installed."
+                        "ensure VC++ Redistributable 2015-2022 is installed, "
+                        "and install the pinned dependency `mediapipe==0.10.14`."
                     )
                     self.status_label.setText(f"Status: Error - {msg}")
                     print(f"Error starting tracker: {msg}")

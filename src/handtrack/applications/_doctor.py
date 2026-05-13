@@ -6,7 +6,7 @@ import argparse
 import importlib
 import os
 import sys
-from typing import Iterable
+from typing import Iterable, Sequence
 
 
 def _check_import(module_name: str) -> tuple[bool, str]:
@@ -25,16 +25,24 @@ def _print_table(rows: Iterable[tuple[str, str]]) -> None:
         print(f"{key.ljust(width)} : {value}")
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Check HandTrack runtime dependencies and optional OptiTrack SDK wiring.",
     )
     parser.add_argument(
+        "--backend",
+        choices=("auto", "optitrack", "webcam"),
+        default="auto",
+        help="backend to validate; auto includes OptiTrack checks when available",
+    )
+    parser.add_argument(
         "--optitrack",
         action="store_true",
-        help="also validate OptiTrack camera SDK module availability",
+        help="deprecated alias for --backend optitrack",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    check_optitrack = args.optitrack or args.backend in ("auto", "optitrack")
 
     required_modules = [
         "numpy",
@@ -71,7 +79,7 @@ def main() -> int:
                 )
             )
 
-    if args.optitrack:
+    if check_optitrack:
         sdk_env = os.environ.get("OPTITRACK_CAM_PY_PATH", "")
         rows.append(("env:OPTITRACK_CAM_PY_PATH", sdk_env or "<not-set>"))
         passed, detail = _check_import("unity_hand_tracking.optitrack_cam_py.config")

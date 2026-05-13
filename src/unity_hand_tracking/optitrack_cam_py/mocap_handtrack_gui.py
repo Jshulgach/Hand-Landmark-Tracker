@@ -137,10 +137,16 @@ def _preload_mediapipe_runtime() -> tuple[bool, str]:
     This reduces Windows DLL initialization conflicts that can appear when
     `_framework_bindings` is imported later in the session.
     """
-    if _MP_PRELOAD_OK:
-        return True, ""
     try:
-        importlib.import_module("mediapipe")
+        mp = importlib.import_module("mediapipe")
+
+        if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "hands"):
+            version = getattr(mp, "__version__", "unknown")
+            return (
+                False,
+                "Installed mediapipe package does not expose the legacy Hands API "
+                f"(found version {version}). Install `mediapipe==0.10.14`.",
+            )
         return True, ""
     except Exception as exc:
         return False, str(exc)
@@ -1015,7 +1021,8 @@ class StereoHandTrackerGUI(QMainWindow):
                     msg = (
                         "MediaPipe preload failed. "
                         "Try running from PowerShell/CMD (not MINGW/MSYS), "
-                        "and ensure VC++ Redistributable 2015-2022 is installed."
+                        "ensure VC++ Redistributable 2015-2022 is installed, "
+                        "and install the pinned dependency `mediapipe==0.10.14`."
                     )
                     self.status_label.setText(f"Status: Error - {msg}")
                     print(f"Error starting tracker: {msg}")
@@ -1209,7 +1216,9 @@ class StereoHandTrackerGUI(QMainWindow):
                     splay_angles = finger_splay_angles_v2(landmarks_array)
                     joint_angles.update(splay_angles)
                     if hand_idx == 0:
-                        self._last_splay_landmarks = np.array(landmarks_array, copy=True)
+                        self._last_splay_landmarks = np.array(
+                            landmarks_array, copy=True
+                        )
 
                 # # -- Comment if unecessary or bad lol --#
                 if self.apply_kalman and hand_idx < len(self.angle_kalman_filters):
@@ -1234,7 +1243,11 @@ class StereoHandTrackerGUI(QMainWindow):
                     # )
                 out_index = 0 if self.remap_selected_hand else selected_idx
                 hand_angle_packets.append(
-                    {"hand_index": out_index, "angles": joint_angles, "label": hand_label}
+                    {
+                        "hand_index": out_index,
+                        "angles": joint_angles,
+                        "label": hand_label,
+                    }
                 )
                 selected_idx += 1
                 if hand_idx == 0:

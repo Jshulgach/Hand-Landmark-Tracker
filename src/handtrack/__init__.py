@@ -2,7 +2,7 @@
 Hand Tracker package for tracking hand landmarks and computing joint angles
 """
 
-__version__ = "0.0.3.10"
+__version__ = "0.1.0"
 __author__ = "Jonathan Shulgach"
 __email__ = "jshulgac@andrew.cmu.edu"
 __license__ = "MIT"

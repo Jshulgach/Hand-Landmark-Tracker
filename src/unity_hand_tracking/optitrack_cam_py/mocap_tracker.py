@@ -120,6 +120,14 @@ class MultiCameraTracker:
         try:
             import mediapipe as mp
 
+            if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "hands"):
+                version = getattr(mp, "__version__", "unknown")
+                raise RuntimeError(
+                    "Installed mediapipe package does not expose the legacy "
+                    f"Hands API (found version {version}). "
+                    "Install the repo-pinned version `mediapipe==0.10.14`."
+                )
+
             return mp.solutions.hands.Hands
         except Exception as exc:
             msg = str(exc)
@@ -130,6 +138,11 @@ class MultiCameraTracker:
                     "On Windows, try launching from PowerShell/CMD (not MINGW/MSYS), "
                     "ensure Microsoft Visual C++ Redistributable 2015-2022 is installed, "
                     "and verify mediapipe is installed in this exact interpreter."
+                )
+            elif "does not expose the legacy Hands API" in msg:
+                hint = (
+                    "\nThis project currently depends on the classic `mediapipe.solutions` "
+                    "API, not the newer Tasks-only package layout."
                 )
             raise RuntimeError(f"Failed to import mediapipe: {msg}{hint}") from exc
 
