@@ -1,0 +1,65 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SimpleCameraTest", "CameraList\SimpleCameraTest.vcproj", "{D04530D4-58C9-476E-8249-30CCEB669D63}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A} = {0C34A2D7-20C0-4C06-8840-ADD2F691271A}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FrameSynchronization", "FrameSynchronization\FrameSynchronization.vcproj", "{77595B86-7D9F-4B4E-8759-1AF01E8B9CC2}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A} = {0C34A2D7-20C0-4C06-8840-ADD2F691271A}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ImageProcessing", "ImageProcessing\ImageProcessing.vcproj", "{4C949F0C-B791-49CF-A067-DFE6672D0D56}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A} = {0C34A2D7-20C0-4C06-8840-ADD2F691271A}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MJPEGViewer", "MJPEGViewer\MJPEGViewer.vcproj", "{9FBBAD05-4F11-4277-827A-ABE1E7743FB4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A} = {0C34A2D7-20C0-4C06-8840-ADD2F691271A}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SegmentMode", "SegmentMode\SegmentMode.vcproj", "{0C34A2D7-20C0-4C06-8840-ADD2F691271A}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VectorTracking", "VectorTracking\VectorTracking.vcproj", "{7946FC04-4277-4232-87E0-C69BADADD65A}"
+	ProjectSection(ProjectDependencies) = postProject
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A} = {0C34A2D7-20C0-4C06-8840-ADD2F691271A}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{D04530D4-58C9-476E-8249-30CCEB669D63}.Debug|Win32.ActiveCfg = Debug|Win32
+		{D04530D4-58C9-476E-8249-30CCEB669D63}.Debug|Win32.Build.0 = Debug|Win32
+		{D04530D4-58C9-476E-8249-30CCEB669D63}.Release|Win32.ActiveCfg = Release|Win32
+		{D04530D4-58C9-476E-8249-30CCEB669D63}.Release|Win32.Build.0 = Release|Win32
+		{77595B86-7D9F-4B4E-8759-1AF01E8B9CC2}.Debug|Win32.ActiveCfg = Debug|Win32
+		{77595B86-7D9F-4B4E-8759-1AF01E8B9CC2}.Debug|Win32.Build.0 = Debug|Win32
+		{77595B86-7D9F-4B4E-8759-1AF01E8B9CC2}.Release|Win32.ActiveCfg = Release|Win32
+		{77595B86-7D9F-4B4E-8759-1AF01E8B9CC2}.Release|Win32.Build.0 = Release|Win32
+		{4C949F0C-B791-49CF-A067-DFE6672D0D56}.Debug|Win32.ActiveCfg = Debug|Win32
+		{4C949F0C-B791-49CF-A067-DFE6672D0D56}.Debug|Win32.Build.0 = Debug|Win32
+		{4C949F0C-B791-49CF-A067-DFE6672D0D56}.Release|Win32.ActiveCfg = Release|Win32
+		{4C949F0C-B791-49CF-A067-DFE6672D0D56}.Release|Win32.Build.0 = Release|Win32
+		{9FBBAD05-4F11-4277-827A-ABE1E7743FB4}.Debug|Win32.ActiveCfg = Debug|Win32
+		{9FBBAD05-4F11-4277-827A-ABE1E7743FB4}.Debug|Win32.Build.0 = Debug|Win32
+		{9FBBAD05-4F11-4277-827A-ABE1E7743FB4}.Release|Win32.ActiveCfg = Release|Win32
+		{9FBBAD05-4F11-4277-827A-ABE1E7743FB4}.Release|Win32.Build.0 = Release|Win32
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A}.Debug|Win32.Build.0 = Debug|Win32
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A}.Release|Win32.ActiveCfg = Release|Win32
+		{0C34A2D7-20C0-4C06-8840-ADD2F691271A}.Release|Win32.Build.0 = Release|Win32
+		{7946FC04-4277-4232-87E0-C69BADADD65A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{7946FC04-4277-4232-87E0-C69BADADD65A}.Debug|Win32.Build.0 = Debug|Win32
+		{7946FC04-4277-4232-87E0-C69BADADD65A}.Release|Win32.ActiveCfg = Release|Win32
+		{7946FC04-4277-4232-87E0-C69BADADD65A}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

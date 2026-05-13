@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://jshulgach.github.io/Hand-Landmark-Tracker/
+    about: Check the public docs before opening a support request.

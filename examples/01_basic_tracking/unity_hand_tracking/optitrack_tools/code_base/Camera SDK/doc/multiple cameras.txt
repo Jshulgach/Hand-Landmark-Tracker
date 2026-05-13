@@ -1,0 +1,51 @@
+
+In the introduction, we present a simple way to fetch a camera
+from the CameraManager using GetCamera().  It's likely that
+the application would want to inspect or present a list of
+available cameras and utilize multiple cameras simultaneously.
+
+To do this, we first want to bring up the devices.
+
+  #include "cameralibrary.h"
+  using namespace CameraLibrary
+
+  CameraManager::X().WaitForInitialization();
+
+
+At any time, you can use a CameraList object to inspect connected
+devices.
+
+  CameraList list;
+
+The CameraList object contains a list of devices connected to the
+system.  The connected devices could be listed simply as follows.
+
+  for(int i=0; i<list.Count(); i++)
+    printf("Device %d: %s", i, list[i].Name());
+
+To refresh the list, you can call Refresh.
+
+  list.Refresh();
+
+If you wanted to fetch the first camera in the camera list, you
+can simply request it from the CameraManager.
+
+  Camera *camera = CameraManager::X().GetCamera(list[i].UID());
+  if(!camera)
+  {
+    // failure
+  }
+
+Cameras are reference counted so it's important to release a camera
+when you are done with it.
+
+  camera->Release();
+
+When your application is closing down, it's important to also
+shutdown the Camera Library to ensure that the hardware is shutdown
+properly.
+
+  CameraManager::X().Shutdown();
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.

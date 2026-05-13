@@ -1,0 +1,49 @@
+
+The Camera Library provides comprehesive control and telemetry
+over every camera setting.  Let's fetch a camera and demonstrate
+some common functionality.
+
+  #include "cameralibrary.h"
+  using namespace CameraLibrary;
+
+  CameraManager::X().WaitForInitialization();
+
+  Camera *camera = CameraManager::X().GetCamera();
+  if(!camera)
+  {
+    // failure
+  }
+
+Before we tell the camera to start outputting frames, lets set
+some common settings.
+
+  camera->SetVideoType(PrecisionMode);
+  camera->SetExposure(50);
+  camera->SetThreshold(200);
+  camera->SetIntensity(15);
+
+Ok, now lets tell the camera to start outputting frames.
+
+  camera->Start();
+
+All camera commands and control are defined in the header file
+camera.h along with brief descriptions.
+
+It's a good practice to stop the camera when you're done with it.
+
+  camera->Stop();
+
+Cameras are also reference counted so it's important to release
+a camera when you are done with it.
+
+  camera->Release();
+
+When your application is closing down, it's important to also
+shutdown the Camera Library to ensure that the hardware is shutdown
+properly.
+
+  CameraManager::X().Shutdown();
+
+That's it!  Look in the /doc directory for additional information
+and short tutorials.
+

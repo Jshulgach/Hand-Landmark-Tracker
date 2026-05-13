@@ -1,10 +1,12 @@
 """
-Hand Tracker with Control Panel
+Hand Tracker with Control Panel and Joint Angle Broadcasting
 
 An interactive hand tracking application with a PyQt5 control panel for:
 - Toggling Kalman filter smoothing
 - Setting save directory for landmark data (CSV/NPZ)
 - Switching between webcam and video file input
+- Broadcasting landmarks on port 5005
+- Broadcasting joint angles on port 5010
 """
 
 import argparse
@@ -15,7 +17,6 @@ import time
 import socket
 import json
 from datetime import datetime
-
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -25,7 +26,7 @@ from PyQt5.QtWidgets import (
     QRadioButton, QButtonGroup, QSpinBox, QSlider, QFrame, QScrollArea
 )
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QPalette, QColor
 
 # Add parent directory to path if handtrack is not installed
 src_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src')
@@ -57,6 +58,109 @@ except ImportError:
             return self.x[:3].flatten()
 
 
+class Kalman1D:
+    """1D Kalman filter for angle smoothing."""
+    def __init__(self, dt=1/30, process_noise=0.1, measurement_noise=1.0):
+        self.x = np.zeros((2, 1))  # [angle, velocity]
+        self.F = np.array([[1, dt], [0, 1]])
+        self.H = np.array([[1, 0]])
+        self.P = np.eye(2)
+        self.Q = np.eye(2) * process_noise
+        self.R = np.array([[measurement_noise]])
+
+    def update(self, z):
+        z = np.array([[z]])
+        # Predict
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
+        # Update
+        y = z - self.H @ self.x
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
+        self.x += K @ y
+        self.P = (np.eye(2) - K @ self.H) @ self.P
+        return self.x[0, 0]
+
+
+def angle_between(v1, v2):
+    """Return angle in degrees between vectors v1 and v2."""
+    v1_norm = np.linalg.norm(v1)
+    v2_norm = np.linalg.norm(v2)
+    
+    # Handle zero vectors
+    if v1_norm < 1e-8 or v2_norm < 1e-8:
+        return 0.0
+    
+    v1 = v1 / v1_norm
+    v2 = v2 / v2_norm
+    dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot))
+    return angle
+
+
+def finger_bend_angles(landmarks):
+    """
+    landmarks: (21, 3) numpy array
+    returns: dict of 14 bending angles (degrees)
+    
+    Bend angle convention:
+    - 0° = straight finger (bone segments aligned)
+    - 90° = fully bent finger (segments perpendicular)
+    """
+
+    def joint_angle(a, b, c):
+        # Calculate the angle at joint b formed by a-b-c
+        # v1 points from b toward a (proximal)
+        # v2 points from b toward c (distal)
+        v1 = a - b
+        v2 = c - b
+        
+        # Get the angle between the two bone segments
+        ang = angle_between(v1, v2)
+        
+        # The bend angle is the supplement: 180° - angle
+        # When straight: 180° - 180° = 0°
+        # When bent 90°: 180° - 90° = 90°
+        bend = 180.0 - ang
+        return np.clip(bend, 0.0, 180.0)
+
+    angles = {}
+
+    # ---- Fingers ----
+    fingers = {
+        "index":  [5, 6, 7, 8],
+        "middle": [9, 10, 11, 12],
+        "ring":   [13, 14, 15, 16],
+        "pinky":  [17, 18, 19, 20],
+    }
+
+    # Wrist is landmark 0, use it as reference for MCP
+    wrist = landmarks[0]
+
+    for name, (mcp, pip, dip, tip) in fingers.items():
+        # MCP: Use wrist as proximal reference to avoid abduction issues
+        # This measures flexion/extension, not abduction/adduction
+        angles[f"{name}_mcp"] = joint_angle(
+            wrist, landmarks[mcp], landmarks[pip]
+        )
+        angles[f"{name}_pip"] = joint_angle(
+            landmarks[mcp], landmarks[pip], landmarks[dip]
+        )
+        angles[f"{name}_dip"] = joint_angle(
+            landmarks[pip], landmarks[dip], landmarks[tip]
+        )
+
+    # ---- Thumb (2 DOF) ----
+    angles["thumb_cmc_mcp"] = joint_angle(
+        landmarks[0], landmarks[2], landmarks[3]
+    )
+    angles["thumb_ip"] = joint_angle(
+        landmarks[2], landmarks[3], landmarks[4]
+    )
+
+    return angles
+
+
 class HandTrackerGUI(QMainWindow):
     """Main window with video display and control panel."""
 
@@ -81,7 +185,7 @@ class HandTrackerGUI(QMainWindow):
 
         # UDP Broadcasting state
         self.udp_enabled = False
-        self.udp_ip = "255.255.255.255"  # Broadcast address
+        self.udp_ip = "127.0.0.1"  # Broadcast address
         self.udp_port = 5005
         self.udp_socket = None
 
@@ -89,18 +193,55 @@ class HandTrackerGUI(QMainWindow):
         self.kalman_filters = [[Kalman3D(process_noise=1e-3, measurement_noise=1e-4) 
                                 for _ in range(self.NUM_LANDMARKS)] for _ in range(self.max_hands)]
 
+        # Initialize Kalman filters for angles (14 angles per hand)
+        # Angle names: index_mcp, index_pip, index_dip, middle_mcp, ..., thumb_cmc_mcp, thumb_ip
+        self.angle_names = [
+            "index_mcp", "index_pip", "index_dip",
+            "middle_mcp", "middle_pip", "middle_dip",
+            "ring_mcp", "ring_pip", "ring_dip",
+            "pinky_mcp", "pinky_pip", "pinky_dip",
+            "thumb_cmc_mcp", "thumb_ip"
+        ]
+        self.angle_kalman_filters = [
+            {name: Kalman1D(process_noise=0.1, measurement_noise=2.0) 
+             for name in self.angle_names} 
+            for _ in range(self.max_hands)
+        ]
+
         # Video capture
         self.cap = None
 
         # MediaPipe Hands
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=self.max_hands,
+            model_complexity = 1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5
         )
 
         self.init_ui()
         self.setup_timer()
+
+    def broadcast_joint_angles(self, hand_angles):
+        """
+        Broadcast joint angles on port 5010
+        hand_angles: list of dicts (one per hand)
+        """
+        if not self.udp_enabled or not self.udp_socket:
+            return
+
+        payload = {
+            "frame": self.frame_count,
+            "timestamp": time.time(),
+            "hands": hand_angles
+        }
+
+        try:
+            msg = json.dumps(payload).encode("utf-8")
+            # Use port 5010 for joint angles
+            self.udp_socket.sendto(msg, (self.udp_ip, 5010))
+        except Exception as e:
+            print(f"Joint angle UDP error: {e}")
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -272,7 +413,7 @@ class HandTrackerGUI(QMainWindow):
         self.udp_port_spin.setValue(self.udp_port)
         self.udp_port_spin.valueChanged.connect(self.on_udp_port_changed)
         port_layout.addWidget(self.udp_port_spin)
-        udp_layout.addWidget(QLabel("(Broadcast port for hand data)"))
+        udp_layout.addWidget(QLabel("(Landmarks: 5005, Angles: 5010)"))
         udp_layout.addLayout(port_layout)
 
         # UDP status
@@ -374,6 +515,7 @@ class HandTrackerGUI(QMainWindow):
         self.hands.close()
         self.hands = mp.solutions.hands.Hands(
             max_num_hands=self.max_hands,
+            model_complexity = 1,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5
         )
@@ -555,6 +697,11 @@ class HandTrackerGUI(QMainWindow):
         """Reset all Kalman filters."""
         self.kalman_filters = [[Kalman3D(process_noise=1e-3, measurement_noise=1e-4) 
                                 for _ in range(self.NUM_LANDMARKS)] for _ in range(self.max_hands)]
+        self.angle_kalman_filters = [
+            {name: Kalman1D(process_noise=0.1, measurement_noise=2.0) 
+             for name in self.angle_names} 
+            for _ in range(self.max_hands)
+        ]
 
     def start_udp_broadcast(self):
         """Initialize UDP socket for broadcasting."""
@@ -563,7 +710,7 @@ class HandTrackerGUI(QMainWindow):
             self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self.udp_status.setText("UDP: Active")
             self.udp_status.setStyleSheet("color: #44ff44;")
-            print(f"UDP broadcast initialized: {self.udp_ip}:{self.udp_port}")
+            print(f"UDP broadcast initialized: {self.udp_ip}:5005 (landmarks) and :5010 (angles)")
         except Exception as e:
             print(f"Error initializing UDP socket: {e}")
             self.udp_enabled = False
@@ -583,7 +730,7 @@ class HandTrackerGUI(QMainWindow):
         self.udp_status.setStyleSheet("color: #888;")
 
     def broadcast_landmarks(self, frame_landmarks, num_hands):
-        """Broadcast hand landmarks via UDP."""
+        """Broadcast hand landmarks via UDP on port 5005."""
         if not self.udp_enabled or not self.udp_socket or not frame_landmarks:
             return
 
@@ -632,6 +779,7 @@ class HandTrackerGUI(QMainWindow):
         results = self.hands.process(rgb)
 
         frame_landmarks = []  # Store landmarks for all hands this frame
+        hand_angle_packets = []  # Store joint angles for all hands
         num_hands = 0
 
         if results.multi_hand_landmarks:
@@ -653,6 +801,27 @@ class HandTrackerGUI(QMainWindow):
 
                 frame_landmarks.append(landmarks_array)
 
+                # ---- Joint angle extraction ----
+                joint_angles = finger_bend_angles(landmarks_array)
+
+                # Apply Kalman filtering to angles if enabled
+                if self.apply_kalman and hand_idx < len(self.angle_kalman_filters):
+                    filtered_angles = {}
+                    for angle_name, angle_value in joint_angles.items():
+                        filtered_angles[angle_name] = self.angle_kalman_filters[hand_idx][angle_name].update(angle_value)
+                    joint_angles = filtered_angles
+
+                # Debug output: print index finger angles for first hand
+                if hand_idx == 0:
+                    print(f"Frame {self.frame_count} - Index MCP: {joint_angles['index_mcp']:.2f}°, "
+                          f"Index PIP: {joint_angles['index_pip']:.2f}°, "
+                          f"Index DIP: {joint_angles['index_dip']:.2f}°")
+
+                hand_angle_packets.append({
+                    "hand_index": hand_idx,
+                    "angles": joint_angles
+                })
+
                 # Draw hand landmarks and connections
                 mp.solutions.drawing_utils.draw_landmarks(
                     frame,
@@ -672,7 +841,11 @@ class HandTrackerGUI(QMainWindow):
         if self.is_recording:
             self.recorded_landmarks.append(frame_landmarks)
 
-        # Broadcast landmarks via UDP if enabled
+        # Broadcast joint angles on port 5010 if UDP enabled
+        if self.udp_enabled and hand_angle_packets:
+            self.broadcast_joint_angles(hand_angle_packets)
+
+        # Broadcast landmarks via UDP on port 5005 if enabled
         if self.udp_enabled and frame_landmarks:
             self.broadcast_landmarks(frame_landmarks, num_hands)
 
@@ -734,7 +907,6 @@ def main():
 
     # Apply dark theme
     palette = app.palette()
-    from PyQt5.QtGui import QPalette, QColor
     palette.setColor(QPalette.Window, QColor(30, 30, 30))
     palette.setColor(QPalette.WindowText, Qt.white)
     palette.setColor(QPalette.Base, QColor(45, 45, 45))

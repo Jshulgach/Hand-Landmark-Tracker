@@ -1,104 +1,39 @@
-# Virtual environments
-.venv
-.handtrack
-.idea
-.ipynb_checkpoints/
-
-# Byte-compiled, chache directories
-intan_utilities/__pycache__
+# Python bytecode and caches
 __pycache__/
-*.pyc
 *.py[cod]
 *$py.class
 
-# Compiled C++ object files
-*.o
-*.obj
-# models made with keras or pytorch
-*.keras
-
-# New data files
-*.csv
-*.txt
-
-# Images
-gesture_classifier/*.png
-*.png
-
-# PyTorch models
-gesture_classifier/*.pth
-*.pth
-
-# Temporary files used for debugging
-/temp/
-temp/*
-data/
-
-# Distribution / packaging
-.Python
-env/
-venv/
-ENV/
-.venv/
+# Packaging/build outputs
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.eggs/
+pip-wheel-metadata/
 
-# Compiled binaries (if any)
-*.exe
-*.out
+# Virtual environments
+.venv/
+venv/
+env/
 
-# Mac OS metadata
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+coverage.xml
+htmlcov/
+site/
+
+# IDE/editor
+.idea/
+.vscode/
+
+# OS/filesystem noise
 .DS_Store
-
-# Windows-specific metadata
 Thumbs.db
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Sphinx documentation
-docs/build/
-
-# Doxygen output directory (if specified inside build/doxygen/xml or similar)
-docs/build/doxygen/
-docs/build/doxygen/xml/
-
-# PyInstaller
-*.manifest
-*.spec
-*.log
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Old utilities
-/old_utils/
-
-# Zip archives
-*.zip
+# Local calibration/runtime artifacts
+calibration_data/
+*.npz
+*.csv

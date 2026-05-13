@@ -20,6 +20,14 @@ examples/
 
 **Simple examples to get started with hand and face tracking**
 
+### OptiTrack Multi-Camera (Flagship)
+
+#### `optitrack_mocap_gui.py` ⭐ **Flagship Demo**
+Stereo OptiTrack GUI with 3D triangulation + UDP/LSL streaming.
+```bash
+python 01_basic_tracking/optitrack_mocap_gui.py
+```
+
 ### Hand Tracking
 
 #### `handtrack_webcam.py`

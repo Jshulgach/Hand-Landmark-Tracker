@@ -1,0 +1,139 @@
+# Configuration file for Open Ephys EMG-to-Joint-Angles Pipeline
+# This file can be used with --config argument in various scripts
+
+# ============================================================
+#  Data Paths
+# ============================================================
+root_dir: /path/to/data
+label: MySession
+
+# Path to Open Ephys recording (.oebin file or folder containing it)
+# If not specified, will search in: {root_dir}/raw/{label}/
+oebin_path: /path/to/data/raw/MySession/Record_Node_XXX/experiment1/recording1/structure.oebin
+
+# ============================================================
+#  EMG Parameters
+# ============================================================
+# Expected EMG sampling frequency (Hz)
+emg_fs: 5000
+
+# Target sampling frequency for resampling (optional)
+# If specified, EMG will be downsampled/upsampled to this rate
+# Set to null to use original sampling rate
+target_emg_fs: null  # e.g., 1000, 2000, or null
+
+# Channel selection (list of channel indices to use)
+# If empty or null, uses all available channels
+channels: [0, 1, 2, 3, 4, 5, 6, 7]
+
+# Feature extraction window parameters
+window_ms: 250  # Window size in milliseconds
+step_ms: 50     # Step size in milliseconds
+
+# ============================================================
+#  Preprocessing Parameters
+# ============================================================
+# Notch filter (remove powerline interference)
+notch_freq: 60  # Hz (use 50 for Europe/Asia, 60 for North America)
+notch_q: 30     # Quality factor
+
+# Bandpass filter (EMG frequency range)
+bandpass_low: 20    # Hz
+bandpass_high: 450  # Hz
+
+# Envelope extraction (lowpass cutoff after rectification)
+envelope_cutoff: 5  # Hz
+
+# ============================================================
+#  Video/Landmark Parameters
+# ============================================================
+# Video frame rate (used if extracting landmarks from video)
+video_fps: 30
+
+# Landmark sampling rate (typically same as video_fps)
+landmark_fs: 30
+
+# Apply Kalman filtering to landmarks during extraction
+apply_kalman: true
+
+# ============================================================
+#  Synchronization
+# ============================================================
+# Sync label (event marker used for synchronization)
+# This should match an event label in your events files
+sync_label: "Start"
+
+# Manual sync offset (seconds) - optional
+# If specified, overrides automatic sync offset calculation
+# Set to null to auto-compute
+manual_sync_offset: null
+
+# ============================================================
+#  Model Training Parameters
+# ============================================================
+# Model architecture
+model_type: EMGRegressor  # Currently only EMGRegressor supported
+
+# Training hyperparameters
+batch_size: 32
+learning_rate: 0.001
+epochs: 100
+validation_split: 0.2
+
+# Model save path (relative to root_dir)
+model_dir: model
+model_filename: MySession_model.pth
+scaler_filename: MySession_scaler.pkl
+
+# ============================================================
+#  Real-time Prediction (ZMQ)
+# ============================================================
+# Open Ephys ZMQ connection
+zmq_host: 127.0.0.1
+zmq_port: 5556
+zmq_buffer_seconds: 30.0
+
+# Prediction smoothing
+apply_kalman_predictions: true
+kalman_process_noise: 0.0001
+kalman_measurement_noise: 0.001
+
+# ============================================================
+#  LSL Streaming (Optional)
+# ============================================================
+# Enable LSL outlet for streaming predictions
+enable_lsl: true
+lsl_outlet_name: JointAngles
+lsl_stream_type: JointAngles
+lsl_channel_labels: ["thumb", "index", "middle", "ring", "pinky"]
+
+# ============================================================
+#  Output/Logging
+# ============================================================
+# Enable verbose output
+verbose: true
+
+# Overwrite existing files
+overwrite: false
+
+# Display video during landmark extraction
+show_video: false
+
+# Save annotated video with landmarks
+save_video: false
+
+# ============================================================
+#  Advanced Options
+# ============================================================
+# Maximum number of channels to allocate (for buffer sizing)
+max_channels: 256
+
+# Expected channel names (optional, for validation)
+# Set to null to skip validation
+expected_channel_names: null
+# Example:
+# expected_channel_names: ["CH01", "CH02", "CH03", "CH04", "CH05", "CH06", "CH07", "CH08"]
+
+# Device-specific settings
+device_type: "Open Ephys"
+acquisition_system: "Open Ephys Acquisition Board"

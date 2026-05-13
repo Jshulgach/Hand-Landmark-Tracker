@@ -1,75 +1,85 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "handtrack"
 version = "0.1.0"
-description = "A Python package for tracking hand landmarks in images and videos."
-authors = [
-    { name="Jonathan Shulgach", email="jonathan@shulgach.com" }
-]
+description = "Hand landmark tracking, triangulation, kinematics, and streaming toolkit"
 readme = "README.md"
-license = {text = "MIT"}
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jonathan Shulgach", email = "jshulgac@andrew.cmu.edu" }]
+keywords = ["hand-tracking", "mediapipe", "optitrack", "kinematics", "lsl"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
 dependencies = [
-    "numpy>=1.23.5",
-    "opencv-python>=4.5.0",
-    "mediapipe>=0.10.9,<0.10.14",
-    #"numpy>=1.26.0", # 1.23.5
-    "scipy",
-    #"pandas",
-    #"matplotlib",
-    #"pyyaml",
-    "PyQt5>=5.15",
-    "pyqtgraph",
-    "PyOpenGL",
-    "tqdm",
-    #"pandas",
-
-    # For device communication
-    "pyserial",
-
-    # For hand rendering
-    #"trimesh",
-    #"chumpy",
-    #"scikit-learn",
-    #"torchvision",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "mediapipe==0.10.14",
+  "scipy>=1.10",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
+  "pylsl>=1.16",
+  "PyQt5>=5.15",
+  "pyqtgraph>=0.13",
+    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
-io = [
-    "pandas",
-    "PyYAML",
-]
-stream = [
-    "pylsl",
-]
-applications = [
-    "matplotlib",
-]
-ml = [
-    "scikit-learn",
-    "torch",
-]
+gui = ["PyQt5>=5.15", "pyqtgraph>=0.13"]
+io = ["pandas>=2.0", "PyYAML>=6.0"]
+lsl = ["pylsl>=1.16"]
+stream = ["pylsl>=1.16"]
+applications = ["matplotlib>=3.8", "pyserial>=3.5"]
+ml = ["scikit-learn>=1.4", "torch"]
+optitrack = ["psutil>=5.9"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+release = ["build>=1.2", "twine>=5.1"]
 all = [
-    "pandas",
-    "PyYAML",
-    "pylsl",
-    "matplotlib",
-    "scikit-learn",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+    "psutil>=5.9",
+    "PyYAML>=6.0",
+    "pyserial>=3.5",
+    "pylsl>=1.16",
+    "scikit-learn>=1.4",
     "torch",
 ]
 
 [project.urls]
-Homepage = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
-Repository = "https://github.com/Jshulgach/Hand-Landmark-Tracker"
-Issues = "https://github.com/Jshulgach/Hand-Landmark-Tracker/issues"
+Homepage = "https://github.com/jshulgach/Hand-Landmark-Tracker"
+Repository = "https://github.com/jshulgach/Hand-Landmark-Tracker"
+Issues = "https://github.com/jshulgach/Hand-Landmark-Tracker/issues"
+Documentation = "https://jshulgach.github.io/Hand-Landmark-Tracker/"
+Changelog = "https://github.com/jshulgach/Hand-Landmark-Tracker/blob/main/CHANGELOG.md"
 
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[project.scripts]
+handtracker = "handtrack.applications._cli:main"
+handtrack-doctor = "handtrack.applications._doctor:main"
+handtrack-inspect-calibration = "handtrack.applications._inspect_calibration:main"
+handtrack-optitrack-gui = "unity_hand_tracking.optitrack_cam_py.mocap_handtrack_gui:main"
+handtrack-optitrack-calibrate = "unity_hand_tracking.optitrack_cam_py.calibration:main"
+handtrack-optitrack-board = "unity_hand_tracking.optitrack_cam_py.generate_charuco_board:main"
+handtrack-optitrack-cameras = "unity_hand_tracking.optitrack_cam_py.multi_mjpeg:main"
+handtrack-optitrack-test-sender = "unity_hand_tracking.optitrack_cam_py.test_sender:main"
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["handtrack*", "unity_hand_tracking*"]
 
-[tool.setuptools.package-data]
-"handtrack" = ["*.yaml", "*.json", "*.csv", "*.ui"]  # include config and UI files if needed
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
