@@ -27,18 +27,35 @@ dependencies = [
   "opencv-python>=4.8",
   "mediapipe==0.10.14",
   "scipy>=1.10",
+    "pandas>=2.0",
+    "PyYAML>=6.0",
   "pylsl>=1.16",
   "PyQt5>=5.15",
   "pyqtgraph>=0.13",
+    "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
 gui = ["PyQt5>=5.15", "pyqtgraph>=0.13"]
+io = ["pandas>=2.0", "PyYAML>=6.0"]
 lsl = ["pylsl>=1.16"]
+stream = ["pylsl>=1.16"]
+applications = ["matplotlib>=3.8", "pyserial>=3.5"]
+ml = ["scikit-learn>=1.4", "torch"]
 optitrack = ["psutil>=5.9"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 release = ["build>=1.2", "twine>=5.1"]
+all = [
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+    "psutil>=5.9",
+    "PyYAML>=6.0",
+    "pyserial>=3.5",
+    "pylsl>=1.16",
+    "scikit-learn>=1.4",
+    "torch",
+]
 
 [project.urls]
 Homepage = "https://github.com/jshulgach/Hand-Landmark-Tracker"
@@ -56,7 +73,6 @@ handtrack-optitrack-calibrate = "unity_hand_tracking.optitrack_cam_py.calibratio
 handtrack-optitrack-board = "unity_hand_tracking.optitrack_cam_py.generate_charuco_board:main"
 handtrack-optitrack-cameras = "unity_hand_tracking.optitrack_cam_py.multi_mjpeg:main"
 handtrack-optitrack-test-sender = "unity_hand_tracking.optitrack_cam_py.test_sender:main"
-
 [tool.setuptools]
 package-dir = { "" = "src" }
 

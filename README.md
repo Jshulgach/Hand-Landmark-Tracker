@@ -59,6 +59,12 @@ The project is built around Google's [MediaPipe](https://developers.google.com/m
   pip install -e .[optitrack]
   ~~~
 
+Optional extras are available for feature-specific dependencies:
+~~~
+pip install -e .[stream]
+pip install -e .[io,applications,ml]
+~~~
+
 
 ## Getting Started
 
@@ -95,6 +101,17 @@ handtracker benchmark --backend webcam --frames 120
 handtracker record --source 0 --frames 300 --save-video
 handtracker replay recordings/session_20260512_120000
 handtracker export recordings/session_20260512_120000
+```
+
+### HandTracker Class
+
+The HandTracker class can also be imported directly in your own projects:
+
+```python
+from handtrack.tracker import HandTracker
+
+tracker = HandTracker(source=0, max_hands=1)
+tracker.run()
 ```
 
 Related operational commands:

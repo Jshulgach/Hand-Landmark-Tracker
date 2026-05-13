@@ -1,11 +1,11 @@
 import numpy as np
 from tqdm import tqdm
-from handtrack.processing import (
+from ._features import extract_features
+from ._filters import (
     notch_filter,
     bandpass_filter,
     lowpass_filter,
     rectify,
-    extract_features
 )
 
 
