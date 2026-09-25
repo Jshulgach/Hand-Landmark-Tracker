@@ -1,0 +1,168 @@
+[evaluate-placement] Analysing 132,651 voxels (51×51×51) ...
+
+======================================================================
+  CAMERA PLACEMENT EVALUATION REPORT
+======================================================================
+
+  Calibration file : C:\Users\NML\Documents\Github\Hand-Landmark-Tracker\src\handtrack\cameras\optitrack\calibration_data\multi_camera_calib_latest.npz
+  Cameras          : 4
+  Image size       : 1280 x 1024 px
+  Grid spacing     : 10.0 mm
+  Grid dimensions  : 51 x 51 x 51
+  Near / far clip  : 100 / 1000 mm
+  Pixel noise (σ)  : 3.00 px
+  Min cameras      : 2
+
+──────────────────────────────────────────────────────────────────────
+  1. CONTROL VOLUME (N-camera coverage)
+──────────────────────────────────────────────────────────────────────
+    0 cameras :    2135 voxels  (  1.6%)  
+    1 cameras :   18290 voxels  ( 13.8%)  ██████
+    2 cameras :   28144 voxels  ( 21.2%)  ██████████
+    3 cameras :   29176 voxels  ( 22.0%)  ██████████
+    4 cameras :   54906 voxels  ( 41.4%)  ████████████████████
+
+    Control volume (>=2 cameras) : 112,226.0 cm³
+    Voxels in control volume          : 112,226 / 132,651
+
+──────────────────────────────────────────────────────────────────────
+  2. TRIANGULATION UNCERTAINTY  [Olague & Mohr 2002]
+──────────────────────────────────────────────────────────────────────
+    RMS positional uncertainty:
+      mean   : 3.4190 mm
+      median : 3.1277 mm
+      95th ‰ : 6.8396 mm
+      max    : 7.8649 mm
+    Worst-axis uncertainty:
+      mean   : 2.5079 mm
+      max    : 7.4501 mm
+    Anisotropy ratio (worst/best axis):
+      mean   : 1.69
+      max    : 4.32
+
+──────────────────────────────────────────────────────────────────────
+  3. RAY CONVERGENCE ANGLES  [ACM VRST: 40-140° acceptable]
+──────────────────────────────────────────────────────────────────────
+    Min convergence angle across volume:
+      mean   : 42.0°
+      median : 34.5°
+      min    : 27.6°
+    Mean convergence angle:
+      mean   : 72.1°
+    Voxels in acceptable range (40-140°) : 23.0%
+
+──────────────────────────────────────────────────────────────────────
+  4. DLT CONDITION NUMBER  [Olague & Mohr 2002]
+──────────────────────────────────────────────────────────────────────
+    Condition number across control volume:
+      mean   : 1.7
+      median : 1.5
+      95th ‰ : 3.6
+      max    : 4.3
+    Well-conditioned (cond < 100) : 100.0%
+
+──────────────────────────────────────────────────────────────────────
+  5. BASELINE-TO-DEPTH RATIO & DEPTH PRECISION  [Szeliski 2022]
+──────────────────────────────────────────────────────────────────────
+    Cameras (0, 1):  baseline = 514.8 mm
+      Z=200mm:  σ_Z = 0.192 mm   B/Z = 2.574
+      Z=400mm:  σ_Z = 0.767 mm   B/Z = 1.287
+      Z=600mm:  σ_Z = 1.727 mm   B/Z = 0.858
+      Z=800mm:  σ_Z = 3.069 mm   B/Z = 0.644
+    Cameras (0, 2):  baseline = 1124.9 mm
+      Z=200mm:  σ_Z = 0.089 mm   B/Z = 5.625
+      Z=400mm:  σ_Z = 0.356 mm   B/Z = 2.812
+      Z=600mm:  σ_Z = 0.801 mm   B/Z = 1.875
+      Z=800mm:  σ_Z = 1.423 mm   B/Z = 1.406
+    Cameras (0, 3):  baseline = 1219.3 mm
+      Z=200mm:  σ_Z = 0.083 mm   B/Z = 6.096
+      Z=400mm:  σ_Z = 0.332 mm   B/Z = 3.048
+      Z=600mm:  σ_Z = 0.748 mm   B/Z = 2.032
+      Z=800mm:  σ_Z = 1.329 mm   B/Z = 1.524
+    Cameras (1, 2):  baseline = 1154.6 mm
+      Z=200mm:  σ_Z = 0.086 mm   B/Z = 5.773
+      Z=400mm:  σ_Z = 0.345 mm   B/Z = 2.886
+      Z=600mm:  σ_Z = 0.776 mm   B/Z = 1.924
+      Z=800mm:  σ_Z = 1.380 mm   B/Z = 1.443
+    Cameras (1, 3):  baseline = 1056.1 mm
+      Z=200mm:  σ_Z = 0.095 mm   B/Z = 5.280
+      Z=400mm:  σ_Z = 0.382 mm   B/Z = 2.640
+      Z=600mm:  σ_Z = 0.859 mm   B/Z = 1.760
+      Z=800mm:  σ_Z = 1.527 mm   B/Z = 1.320
+    Cameras (2, 3):  baseline = 505.1 mm
+      Z=200mm:  σ_Z = 0.202 mm   B/Z = 2.526
+      Z=400mm:  σ_Z = 0.809 mm   B/Z = 1.263
+      Z=600mm:  σ_Z = 1.821 mm   B/Z = 0.842
+      Z=800mm:  σ_Z = 3.237 mm   B/Z = 0.631
+
+──────────────────────────────────────────────────────────────────────
+  6-7. PER-CAMERA INTRINSIC PROPERTIES
+──────────────────────────────────────────────────────────────────────
+    Camera 0:
+      Focal length     : fx=1209.2  fy=1251.7 px
+      Principal point  : (676.0, 567.1) px  offset=65.9 px
+      FOV              : 55.8° x 44.5°  (diag 67.3°)
+      Focal ratio      : 0.9660  (1.0 = square pixels)
+      Distortion |k|   : 2.8395
+      GSD (mm/px)     : @200mm=0.165  @400mm=0.331  @600mm=0.496  @800mm=0.662
+    Camera 1:
+      Focal length     : fx=1220.8  fy=1205.4 px
+      Principal point  : (674.5, 528.1) px  offset=38.0 px
+      FOV              : 55.3° x 46.0°  (diag 68.1°)
+      Focal ratio      : 1.0128  (1.0 = square pixels)
+      Distortion |k|   : 5.0065
+      GSD (mm/px)     : @200mm=0.164  @400mm=0.328  @600mm=0.491  @800mm=0.655
+    Camera 2:
+      Focal length     : fx=1188.8  fy=1139.2 px
+      Principal point  : (616.7, 552.8) px  offset=47.0 px
+      FOV              : 56.6° x 48.4°  (diag 70.3°)
+      Focal ratio      : 1.0435  (1.0 = square pixels)
+      Distortion |k|   : 0.2933
+      GSD (mm/px)     : @200mm=0.168  @400mm=0.336  @600mm=0.505  @800mm=0.673
+    Camera 3:
+      Focal length     : fx=1159.9  fy=1183.1 px
+      Principal point  : (541.3, 551.7) px  offset=106.4 px
+      FOV              : 57.8° x 46.8°  (diag 70.0°)
+      Focal ratio      : 0.9805  (1.0 = square pixels)
+      Distortion |k|   : 35.6700
+      GSD (mm/px)     : @200mm=0.172  @400mm=0.345  @600mm=0.517  @800mm=0.690
+
+──────────────────────────────────────────────────────────────────────
+  8. EPIPOLAR CONSISTENCY  [Zhang 1998]
+──────────────────────────────────────────────────────────────────────
+    Cameras (0, 1):  |det(F)| = 1.29e-30  [OK]
+    Cameras (0, 2):  |det(F)| = 4.18e-30  [OK]
+    Cameras (0, 3):  |det(F)| = 1.79e-29  [OK]
+    Cameras (1, 2):  |det(F)| = 4.61e-29  [OK]
+    Cameras (1, 3):  |det(F)| = 2.50e-29  [OK]
+    Cameras (2, 3):  |det(F)| = 2.31e-31  [OK]
+
+──────────────────────────────────────────────────────────────────────
+  9. SUMMARY — VICON COMPARISON TABLE
+──────────────────────────────────────────────────────────────────────
+    Metric                                       This System       VICON Vero (ref)
+    ──────────────────────────────────────── ───────────────   ────────────────────
+    Control volume                             112,226.0 cm³     ~64M cm³ (4×4×4 m)
+    Mean positional accuracy                        3.419 mm           0.08-0.26 mm
+    Worst-case accuracy                             7.450 mm                ~0.3 mm
+    Median condition number                              1.5                    N/A
+    Min convergence angle                              27.6°                    N/A
+    Mean baseline                                   929.1 mm                 varies
+    Number of cameras                                      4           8-12 typical
+    Image resolution                               1280×1024            16MP (Vero)
+
+  References:
+    Merriaux et al., Sensors 17(7):1591, 2017
+    Windolf et al., J Biomechanics 41(16):2776-2780, 2008
+    Topley & Richards, PMC systematic review, 2022
+
+[evaluate-placement] Saving visualisations to Flex_13_Placement_Evaluation_v3/ ...
+  ✓ Flex_13_Placement_Evaluation_v3\camera_layout.png
+  ✓ Flex_13_Placement_Evaluation_v3\coverage_xy.png
+  ✓ Flex_13_Placement_Evaluation_v3\coverage_xz.png
+  ✓ Flex_13_Placement_Evaluation_v3\coverage_yz.png
+  ✓ Flex_13_Placement_Evaluation_v3\uncertainty_xy.png
+  ✓ Flex_13_Placement_Evaluation_v3\condition_number_xy.png
+  ✓ Flex_13_Placement_Evaluation_v3\convergence_angle_xy.png
+  ✓ Flex_13_Placement_Evaluation_v3\baselines.png
+[evaluate-placement] Report saved to Flex_13_Placement_Evaluation_v3\placement_evaluation.txt

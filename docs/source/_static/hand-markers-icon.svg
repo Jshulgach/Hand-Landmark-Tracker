@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hand with landmark markers">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1b2a41"/>
+      <stop offset="100%" stop-color="#2f5f99"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="14" fill="url(#bg)" stroke="#9dc6ff" stroke-width="1.5"/>
+  <path d="M18 44V26a3 3 0 0 1 6 0v9h1V20a3 3 0 0 1 6 0v15h1V22a3 3 0 0 1 6 0v13h1V26a3 3 0 1 1 6 0v17c0 6-5 11-11 11H29c-6 0-11-4-11-10z" fill="none" stroke="#eef5ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="24" cy="35" r="2.1" fill="#62a8ff"/>
+  <circle cx="31" cy="30" r="2.1" fill="#62a8ff"/>
+  <circle cx="38" cy="30" r="2.1" fill="#62a8ff"/>
+  <circle cx="45" cy="35" r="2.1" fill="#62a8ff"/>
+  <circle cx="33" cy="50" r="2.1" fill="#62a8ff"/>
+</svg>

@@ -1,5 +1,10 @@
 import os
 import sys
+from pathlib import Path
+
+
+_SRC_ROOT = Path(__file__).resolve().parents[2]
+_CORE_OPTITRACK_DIR = _SRC_ROOT / "handtrack" / "cameras" / "optitrack"
 
 # Try to import compiled OptiTrack SDK module.
 # Search order:
@@ -11,8 +16,12 @@ _env_sdk_path = os.environ.get("OPTITRACK_CAM_PY_PATH", "").strip()
 if _env_sdk_path:
     _sdk_extra_paths.append(_env_sdk_path)
 
-_local_release = os.path.join(os.path.dirname(__file__), "Release")
-_sdk_extra_paths.append(_local_release)
+_sdk_extra_paths.extend(
+    [
+        str(_CORE_OPTITRACK_DIR / "Release"),
+        os.path.join(os.path.dirname(__file__), "Release"),
+    ]
+)
 
 for _p in _sdk_extra_paths:
     if _p and os.path.isdir(_p) and _p not in sys.path:
@@ -56,9 +65,17 @@ CHARUCO_SQUARE_LENGTH = 0.040  # Size of each square in meters (40mm)
 CHARUCO_MARKER_LENGTH = 0.030  # Size of each marker in meters (30mm)
 ARUCO_DICT = "DICT_5X5_250"  # ArUco dictionary type
 
-# Calibration data paths
-CALIBRATION_DIR = os.path.join(os.path.dirname(__file__), "calibration_data")
-CALIBRATION_FILE = os.path.join(CALIBRATION_DIR, "multi_camera_calib_latest.npz")
+# Calibration data is owned by the reusable camera backend. Environment
+# overrides are useful for deployed systems that keep calibration outside the
+# source tree.
+CALIBRATION_DIR = os.environ.get(
+    "HANDTRACK_OPTITRACK_CALIBRATION_DIR",
+    str(_CORE_OPTITRACK_DIR / "calibration_data"),
+)
+CALIBRATION_FILE = os.environ.get(
+    "HANDTRACK_OPTITRACK_CALIBRATION_FILE",
+    os.path.join(CALIBRATION_DIR, "multi_camera_calib_latest.npz"),
+)
 
 # Number of calibration images to capture per camera
 NUM_CALIBRATION_IMAGES = 36  # 6 for each camera 6*n

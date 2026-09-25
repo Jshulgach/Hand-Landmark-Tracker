@@ -1,4 +1,9 @@
 import os
+from pathlib import Path
+
+
+_SRC_ROOT = Path(__file__).resolve().parents[2]
+_CORE_WEBCAM_DIR = _SRC_ROOT / "handtrack" / "cameras" / "webcam"
 
 # ==================== CAMERA SETTINGS ====================
 
@@ -37,8 +42,14 @@ CHARUCO_MARKER_LENGTH = 0.030  # Size of each marker in meters (30mm)
 ARUCO_DICT = "DICT_5X5_250"  # ArUco dictionary type
 
 # Calibration data paths
-CALIBRATION_DIR = os.path.join(os.path.dirname(__file__), "calibration_data")
-CALIBRATION_FILE = os.path.join(CALIBRATION_DIR, "multi_camera_calib_latest.npz")
+CALIBRATION_DIR = os.environ.get(
+    "HANDTRACK_WEBCAM_CALIBRATION_DIR",
+    str(_CORE_WEBCAM_DIR / "calibration_data"),
+)
+CALIBRATION_FILE = os.environ.get(
+    "HANDTRACK_WEBCAM_CALIBRATION_FILE",
+    os.path.join(CALIBRATION_DIR, "multi_camera_calib_latest.npz"),
+)
 
 # Number of calibration images to capture per camera
 NUM_CALIBRATION_IMAGES = 36  # 6 for each camera 6*n

@@ -1,3 +1,6 @@
+import sys
+from types import SimpleNamespace
+
 from handtrack.applications import _cli
 
 
@@ -9,6 +12,25 @@ def test_auto_backend_prefers_optitrack(monkeypatch):
 def test_auto_backend_falls_back_to_webcam(monkeypatch):
     monkeypatch.setattr(_cli, "_optitrack_sdk_available", lambda: False)
     assert _cli._resolve_backend("auto") == "webcam"
+
+
+def test_module_entrypoint_does_not_receive_outer_cli_arguments(monkeypatch):
+    received = {}
+
+    def fake_main():
+        received["argv"] = list(sys.argv)
+        return None
+
+    monkeypatch.setattr(
+        _cli.importlib,
+        "import_module",
+        lambda _module_name: SimpleNamespace(main=fake_main),
+    )
+    monkeypatch.setattr(sys, "argv", ["handtracker", "gui"])
+
+    assert _cli._run_module_entrypoint("example.backend") == 0
+    assert received["argv"] == ["handtracker"]
+    assert sys.argv == ["handtracker", "gui"]
 
 
 def test_gui_dispatches_to_selected_backend(monkeypatch):

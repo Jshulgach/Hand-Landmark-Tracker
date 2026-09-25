@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import sys
 from typing import Sequence
 
 _BACKEND_ENTRYPOINTS = {
@@ -51,7 +52,16 @@ def _run_module_entrypoint(module_name: str) -> int:
             f"Module '{module_name}' does not expose a main() entrypoint."
         )
 
-    result = main()
+    # Backend applications own their argument parsers.  Do not let the outer
+    # ``handtracker`` command (for example, ``gui``) leak into those parsers.
+    # The unified CLI has already consumed and validated its arguments here.
+    previous_argv = sys.argv
+    sys.argv = [previous_argv[0]]
+    try:
+        result = main()
+    finally:
+        sys.argv = previous_argv
+
     return 0 if result is None else int(result)
 
 

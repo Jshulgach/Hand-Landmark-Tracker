@@ -150,47 +150,57 @@ class CameraManager:
 
         self.workers: list[CameraWorker] = []
 
-    def _get_camera_handle(
-        self, index: int, retries: int = 3, retry_delay: float = 0.5
-    ):
-        """Resolve a camera handle from the SDK with a short retry budget."""
-        last_camera = None
-        for attempt in range(retries):
-            last_camera = optitrack_cam.get_camera_by_index(index)
-            if last_camera is not None:
-                return last_camera
-            if attempt < retries - 1:
-                time.sleep(retry_delay)
-        return last_camera
-
     # -- lifecycle ----------------------------------------------------------
 
-    def start_all(self, exposure=CAMERA_EXPOSURE, mjpeg_mode=MJPEG_MODE):
+    def start_all(
+        self,
+        exposure=CAMERA_EXPOSURE,
+        mjpeg_mode=MJPEG_MODE,
+        acquisition_rounds: int = 10,
+        retry_delay: float = 0.5,
+    ):
         """Create and start a CameraWorker for every detected camera."""
         if self.workers:
             return self.workers
 
-        missing_indices = []
-        for i in range(self.num_cameras):
-            cam = self._get_camera_handle(i)
-            if cam is not None:
-                worker = CameraWorker(cam, i, exposure=exposure, mjpeg_mode=mjpeg_mode)
-                worker.start()
-                self.workers.append(worker)
-                print(f"Started worker for Camera {i}")
-            else:
-                missing_indices.append(i)
+        # Cameras can appear in camera_count() before all SDK handles are
+        # ready. Retry every unresolved index in rounds so early indices are
+        # revisited instead of giving each one a single, premature window.
+        handles = {}
+        pending = set(range(self.num_cameras))
+        for attempt in range(max(1, acquisition_rounds)):
+            for index in sorted(pending):
+                camera = optitrack_cam.get_camera_by_index(index)
+                if camera is not None:
+                    handles[index] = camera
+            pending.difference_update(handles)
+            if not pending:
+                break
+            if attempt < acquisition_rounds - 1:
+                time.sleep(retry_delay)
 
-        if missing_indices:
-            print(
-                f"Warning: failed to acquire camera handles for indices: {missing_indices}"
-            )
-
-        if not self.workers and self.num_cameras > 0:
+        if pending:
+            for camera in handles.values():
+                try:
+                    camera.release()
+                except Exception:
+                    pass
             raise RuntimeError(
-                "OptiTrack SDK detected cameras but did not return usable camera handles. "
-                "Try waiting a few seconds after camera power-up, then rerun calibration."
+                "OptiTrack detected "
+                f"{self.num_cameras} cameras but could not acquire handles for "
+                f"indices {sorted(pending)} after {max(1, acquisition_rounds)} "
+                "attempts. Close other camera applications, power-cycle any "
+                "missing cameras, wait a few seconds, and try again."
             )
+
+        for index in range(self.num_cameras):
+            worker = CameraWorker(
+                handles[index], index, exposure=exposure, mjpeg_mode=mjpeg_mode
+            )
+            worker.start()
+            self.workers.append(worker)
+            print(f"Started worker for Camera {index}")
+
         return self.workers
 
     def stop_all(self):

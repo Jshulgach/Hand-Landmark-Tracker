@@ -1128,6 +1128,12 @@ class StereoHandTrackerGUI(QMainWindow):
             # Start GUI refresh timer (~60 Hz display rate)
             self.timer.start(16)
         except Exception as e:
+            if self.tracker is not None:
+                try:
+                    self.tracker.cleanup()
+                except Exception as cleanup_error:
+                    print(f"Error cleaning up failed tracker start: {cleanup_error}")
+                self.tracker = None
             self.status_label.setText(f"Status: Error - {str(e)}")
             print(f"Error starting tracker: {e}")
 
