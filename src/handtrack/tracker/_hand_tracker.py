@@ -5,6 +5,8 @@ import mediapipe as mp
 import numpy as np
 from tqdm import tqdm
 import time
+from mavis_track._lifecycle import close_after, cleanup_failed_start
+from handtrack.processing._joint_angles import ANGLE_TRIPLES
 from handtrack.processing import Kalman3D, compute_all_joint_angles
 
 
@@ -14,6 +16,7 @@ class HandTracker:
 
     Supports Kalman filtering for smoothing landmark trajectories and joint angle computation.
     """
+    @cleanup_failed_start
     def __init__(self, source=0, img_size=(1080, 720), video_fps=30, max_hands=1, confidence=0.8, apply_kalman=True,
                  save_angles=False, out_path='angles.csv', verbose=False):
         """
@@ -31,6 +34,11 @@ class HandTracker:
             verbose (bool): If True, prints additional information during processing.
 
         """
+        self.cap = None
+        self.hands = None
+        self._writer = None
+        self._progress = None
+        self._closed = False
         self.source = source
         self.img_size = img_size
         self.max_hands = max(1, int(max_hands))
@@ -64,6 +72,7 @@ class HandTracker:
         self.last_angles = None  # For histogram
         self.landmarks_filtered = None  # Store filtered landmarks for visualization
 
+    @close_after
     def extract_landmarks(self, visualize=False, save_video=False, flip_frame=False):
         """
         Extracts hand landmarks from the video source.
@@ -89,12 +98,16 @@ class HandTracker:
         pbar = tqdm(total=total_frames if total_frames > 0 else None,
                     desc="Processing frames", unit="frame")
 
+        self._progress = pbar
         # Optional video writer
         if save_video:
             base_path = os.path.splitext(os.path.basename(self.source))[0]
             out_path = f"{base_path}_labeled.mp4"
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out_writer = cv2.VideoWriter(out_path, fourcc, fps, (frame_width, frame_height))
+            self._writer = out_writer
+            if not out_writer.isOpened():
+                raise RuntimeError(f"Cannot open video writer: {out_path}")
             print(f"[INFO] Saving labeled video to {out_path}")
         else:
             out_writer = None
@@ -116,10 +129,10 @@ class HandTracker:
             _, filtered_frame, detected_count = self._prepare_landmarks(landmarks)
             smooth_landmarks.append(self._format_landmarks(filtered_frame.copy()))
 
-            # Compute joint angles
-            #angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
-            #print(f"shape of angles: {len(angles)}")
-            #self.last_angles = angles
+            if self.save_angles:
+                points = filtered_frame[0] * [frame.shape[1], frame.shape[0], frame.shape[1]]
+                angles = compute_all_joint_angles(points) if detected_count else dict.fromkeys(ANGLE_TRIPLES, np.nan)
+                self.joint_log.append([frame_idx / fps] + list(angles.values()))
 
             if visualize or save_video:
                 # Draw landmarks on the frame
@@ -171,6 +184,8 @@ class HandTracker:
             'time_vector': np.arange(processed_frames, dtype=np.float32) / fps
         }
 
+        if self.save_angles:
+            self.export_joint_log()
         return landmarks_np, metadata
 
     def _create_filter_bank(self):
@@ -239,6 +254,7 @@ class HandTracker:
             return None
         return cv2.flip(frame, 1) if flip_frame else frame
 
+    @close_after
     def run(self):
         """
         Run real-time hand tracking from webcam
@@ -262,7 +278,7 @@ class HandTracker:
                 _, filtered_landmarks, _ = self._prepare_landmarks(landmarks)
                 self.landmarks_filtered = self._format_landmarks(filtered_landmarks.copy())
                 primary_landmarks = self._primary_landmarks()
-                self.last_angles = compute_all_joint_angles(primary_landmarks) if primary_landmarks is not None else None
+                self.last_angles = compute_all_joint_angles(primary_landmarks * [frame.shape[1], frame.shape[0], frame.shape[1]]) if primary_landmarks is not None else None
 
                 # Compute joint angles
                 #angles = compute_all_joint_angles(self._wrap_to_hand(self.landmarks_filtered))
@@ -271,8 +287,8 @@ class HandTracker:
 
                 #if self.verbose:
                 #    print(angles)
-                #if self.save_angles:
-                #    self.joint_log.append([time.time()] + list(angles.values()))
+                if self.save_angles and self.last_angles:
+                    self.joint_log.append([time.perf_counter()] + list(self.last_angles.values()))
             else:
                 self.landmarks_filtered = None
                 self.last_angles = None
@@ -365,6 +381,8 @@ class HandTracker:
 
         """
         for i, (joint_name, angle) in enumerate(angles.items()):
+            if not np.isfinite(angle):
+                continue
             y = base_y + i * (bar_height + spacing)
             bar_len = int((angle / 180) * max_bar_width)
 
@@ -411,7 +429,7 @@ class HandTracker:
         self.landmarks_filtered = self._format_landmarks(filtered_landmarks.copy()) if detected_count else None
 
         primary_landmarks = self._primary_landmarks()
-        angles = compute_all_joint_angles(primary_landmarks) if primary_landmarks is not None else None
+        angles = compute_all_joint_angles(primary_landmarks * [frame.shape[1], frame.shape[0], frame.shape[1]]) if primary_landmarks is not None else None
         self.last_angles = angles
 
         return landmarks, self.landmarks_filtered, angles, results
@@ -436,6 +454,27 @@ class HandTracker:
             writer.writerow(header)
             writer.writerows(self.joint_log)
         print(f"Saved joint angle log to {self.out_path}")
+
+    def close(self):
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        for name in ('cap', '_writer', '_progress', 'hands'):
+            resource = getattr(self, name, None)
+            if resource is not None:
+                method = getattr(resource, 'release', None) or getattr(resource, 'close', None)
+                if method:
+                    method()
+
+    cleanup = close
+
+    def __enter__(self):
+        if self._closed:
+            raise RuntimeError('Tracker is closed')
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     def get_landmarks(self):
         """

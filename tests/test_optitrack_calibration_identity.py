@@ -16,7 +16,7 @@ def _write_calibration(path, uid_low=(11, 22)):
         "camera_serials": np.array(["F13-A", "F13-B"]),
     }
     for camera in range(2):
-        data[f"camera_matrix_{camera}"] = np.eye(3)
+        data[f"camera_matrix_{camera}"] = np.diag([500. + camera * 100, 500. + camera * 100, 1.])
         data[f"dist_coeffs_{camera}"] = np.zeros((1, 5))
         data[f"R_{camera}"] = np.eye(3)
         data[f"T_{camera}"] = np.zeros((3, 1))
@@ -48,7 +48,7 @@ def test_schema_v2_calibration_accepts_exact_camera_identity(monkeypatch, tmp_pa
     assert len(tracker.projection_matrices) == 2
 
 
-def test_schema_v2_calibration_rejects_reordered_camera_uid(monkeypatch, tmp_path):
+def test_schema_v2_calibration_remaps_reordered_camera_uid(monkeypatch, tmp_path):
     calibration = tmp_path / "calibration.npz"
     _write_calibration(calibration, uid_low=(22, 11))
     monkeypatch.setattr(mocap_tracker, "CALIBRATION_FILE", str(calibration))
@@ -56,6 +56,8 @@ def test_schema_v2_calibration_rejects_reordered_camera_uid(monkeypatch, tmp_pat
 
     tracker.load_calibration()
     assert len(tracker.projection_matrices) == 2
+    assert tracker.camera_matrices[0][0, 0] == 600
+    assert tracker.camera_matrices[1][0, 0] == 500
 
 
 def test_schema_v2_calibration_no_longer_requires_quality_flag(monkeypatch, tmp_path):
@@ -65,3 +67,31 @@ def test_schema_v2_calibration_no_longer_requires_quality_flag(monkeypatch, tmp_
     tracker = _tracker()
 
     tracker.load_calibration()
+
+
+def test_calibration_rejects_different_physical_camera(monkeypatch, tmp_path):
+    calibration = tmp_path / 'calibration.npz'
+    _write_calibration(calibration, uid_low=(11, 99))
+    monkeypatch.setattr(mocap_tracker, 'CALIBRATION_FILE', str(calibration))
+    with pytest.raises(ValueError, match='UIDs'):
+        _tracker().load_calibration()
+
+
+def test_calibration_rejects_changed_resolution(monkeypatch, tmp_path):
+    calibration = tmp_path / 'calibration.npz'
+    _write_calibration(calibration)
+    monkeypatch.setattr(mocap_tracker, 'CALIBRATION_FILE', str(calibration))
+    tracker = _tracker()
+    tracker.img_width = 640
+    with pytest.raises(ValueError, match='resolution'):
+        tracker.load_calibration()
+
+
+def test_saved_uids_cannot_silently_downgrade_to_source_indices(monkeypatch, tmp_path):
+    calibration = tmp_path / 'calibration.npz'
+    _write_calibration(calibration)
+    monkeypatch.setattr(mocap_tracker, 'CALIBRATION_FILE', str(calibration))
+    tracker = _tracker()
+    tracker.cam_mgr = SimpleNamespace(camera_indices=[0, 1])
+    with pytest.raises(ValueError, match='UID diagnostics'):
+        tracker.load_calibration()

@@ -1,0 +1,9 @@
+include LICENSE THIRD_PARTY_NOTICES.md
+include src/unity_hand_tracking/*_Hand_Listener.cs
+recursive-exclude src *.dll *.pyd *.lib *.exe *.npz *.csv *.pdf
+recursive-include scripts *.py
+prune src/handtrack/cameras/optitrack/Release
+prune src/unity_hand_tracking/optitrack_cam_py/Release
+prune src/unity_hand_tracking/optitrack_tools/code_base
+prune examples
+prune docs

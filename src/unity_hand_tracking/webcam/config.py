@@ -1,4 +1,5 @@
 import os
+from mavis_track.calibration import default_calibration_dir
 from pathlib import Path
 
 
@@ -44,7 +45,7 @@ ARUCO_DICT = "DICT_5X5_250"  # ArUco dictionary type
 # Calibration data paths
 CALIBRATION_DIR = os.environ.get(
     "HANDTRACK_WEBCAM_CALIBRATION_DIR",
-    str(_CORE_WEBCAM_DIR / "calibration_data"),
+    str(default_calibration_dir("webcam")),
 )
 CALIBRATION_FILE = os.environ.get(
     "HANDTRACK_WEBCAM_CALIBRATION_FILE",

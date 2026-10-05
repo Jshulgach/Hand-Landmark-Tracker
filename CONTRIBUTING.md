@@ -6,7 +6,7 @@
 python -m venv .venv
 .venv\Scripts\activate
 python -m pip install --upgrade pip
-python -m pip install -e .[dev,docs,release]
+python -m pip install -e ".[dev,gui,io,stream,docs,release]"
 ```
 
 ## Before Opening a Pull Request
@@ -15,9 +15,9 @@ Run the local checks:
 
 ```bash
 python -m pytest -q
-handtracker --help
-handtracker doctor --help
-handtracker inspect-calibration --backend webcam
+mavis-track --help
+mavis-track doctor --help
+mavis-track inspect-calibration --backend webcam
 mkdocs build --strict
 python -m build
 python -m twine check dist/*

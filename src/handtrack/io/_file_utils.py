@@ -1,7 +1,10 @@
 import os
-from tkinter import filedialog
-import pandas as pd
-import yaml
+import numpy as np
+
+
+def _choose_file(**kwargs):
+    from tkinter import filedialog
+    return filedialog.askopenfilename(**kwargs)
 
 
 def load_txt_config(file_path=None, verbose=False):
@@ -18,7 +21,7 @@ def load_txt_config(file_path=None, verbose=False):
     """
 
     if file_path is None:
-        file_path = filedialog.askopenfilename(title="Select Notes File", filetypes=[("Text files", "*.txt")])
+        file_path = _choose_file(title="Select Notes File", filetypes=[("Text files", "*.txt")])
         if not file_path:
             if verbose:
                 print("Cancelled selection")
@@ -50,7 +53,7 @@ def load_yaml_config(file_path=None, verbose=False):
         dict: Parsed config dictionary.
     """
     if file_path is None:
-        file_path = filedialog.askopenfilename(title="Select Notes File", filetypes=[("Text files", "*.txt")])
+        file_path = _choose_file(title="Select Notes File", filetypes=[("Text files", "*.txt")])
         if not file_path:
             if verbose:
                 print("Cancelled selection")
@@ -60,6 +63,7 @@ def load_yaml_config(file_path=None, verbose=False):
         print(f"Config file not found: {file_path}")
         return None
 
+    import yaml
     with open(file_path, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -74,6 +78,7 @@ def update_yaml_config(config_path, updates):
         config_path (str): Path to the config file.
         updates (dict): Dictionary of values to update.
     """
+    import yaml
     config = {}
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
@@ -312,4 +317,5 @@ def load_feature_dataset(root_dir, label=None, config_file=None, verbose=False):
     if verbose:
         print(f"[INFO] Loading feature dataset from {data_path}")
 
-    return np.load(data_path)
+    from mavis_track._files import load_npz
+    return load_npz(data_path)

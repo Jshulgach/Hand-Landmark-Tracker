@@ -1,34 +1,22 @@
-# HandTrack core examples
+# MAVIS core examples
 
-This download contains the practical examples intended for most users:
+This first-release bundle contains `mavis_webcam.py`, licenses, and the legacy
+Unity CSV bone-rotation listeners. SDK assets and recorded data are excluded.
 
-- basic webcam, OptiTrack, Unity, and passive-marker workflows
-- landmark and feature extraction
-- LSL and realtime streaming
-- robotics and virtual-hand demonstrations
+Install `mavis-track` from PyPI with Python 3.10–3.12 and run
+`python mavis_webcam.py`. For source development, install the repository with
+`python -m pip install .` instead.
 
-Install HandTrack before running an example:
-
-```bash
-python -m venv .venv
-python -m pip install handtrack
-```
-
-For development against a repository checkout, use `python -m pip install -e .`
-from the repository root instead.
-
-Start with the unified GUI:
+For the desktop studio, install the GUI extra and run `mavis-track demo`.
+For recording, replay, and export:
 
 ```bash
-handtracker gui
+mavis-track record --source 0 --frames 300 --max-hands 2 --session-name demo
+mavis-track replay recordings/demo
+mavis-track export recordings/demo
 ```
 
-Use the GUI dropdown for Hands, Face, Pose, or Everything. OptiTrack workflows
-require a compatible SDK installed separately under OptiTrack's license. No
-OptiTrack SDK files or recorded datasets are included in this download.
-
-These examples are versioned with the corresponding HandTrack release. Download
-the bundle attached to the same release as your installed package.
-
-MANO virtual-hand examples require separately obtained model files. Set
-`MANO_MODELS_DIR` to their directory before running those examples.
+The Python example demonstrates caller-owned capture and guaranteed cleanup.
+See the project's integration guide for result coordinates, presence, and IDs.
+The Unity listener files accept legacy CSV rotations; they do not consume the
+MAVIS JSON landmark packets. A Unity JSON receiver is a separate integration.

@@ -1,4 +1,4 @@
-# HandTrack research examples
+# MAVIS research examples
 
 This optional download contains experimental research workflows for:
 
@@ -10,10 +10,10 @@ These scripts are provided as research references, not stable public APIs. They
 may require optional scientific dependencies, project-specific configuration,
 and local datasets that are not distributed with HandTrack.
 
-Install the package and research dependencies first:
+Install the package and research dependencies:
 
 ```bash
-python -m pip install "handtrack[ml,io,stream]"
+python -m pip install "mavis-track[ml,io,stream]"
 ```
 
 Review the README and example configuration inside each directory before

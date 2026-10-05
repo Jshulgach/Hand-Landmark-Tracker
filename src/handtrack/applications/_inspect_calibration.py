@@ -64,12 +64,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     _print_row("modified", modified_at.isoformat(timespec="seconds"))
 
     try:
-        data = np.load(calibration_path, allow_pickle=True)
+        from mavis_track._files import load_npz
+        data = load_npz(calibration_path)
     except Exception as exc:
         _print_row("status", f"unreadable ({exc})")
         return 1
 
-    keys = set(data.files)
+    try:
+        from mavis_track.calibration import load_camera_calibration
+        load_camera_calibration(calibration_path, count=int(data.get("num_cameras", 0)))
+    except (ValueError, TypeError, KeyError) as exc:
+        _print_row("valid", f"no: {exc}")
+        return 1
+    keys = set(data)
     num_cameras = data["num_cameras"].item() if "num_cameras" in keys else None
     img_size = data["img_size"] if "img_size" in keys else None
     num_captures = data["num_captures"] if "num_captures" in keys else None

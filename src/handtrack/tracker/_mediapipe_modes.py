@@ -85,11 +85,19 @@ class MediaPipeModeTracker:
         new_mode = TrackingMode.parse(mode)
         if new_mode is self.mode:
             return
-        self.close()
+        old_mode, old_solution = self.mode, self._solution
         self.mode = new_mode
-        self._create_solution()
+        try:
+            self._create_solution()
+        except Exception:
+            self.mode, self._solution = old_mode, old_solution
+            raise
+        if old_solution is not None:
+            old_solution.close()
 
     def process(self, rgb_frame: Any) -> TrackingResult:
+        if self._solution is None:
+            raise RuntimeError("Tracker is closed")
         raw = self._solution.process(rgb_frame)
         result = TrackingResult(mode=self.mode, raw=raw)
 

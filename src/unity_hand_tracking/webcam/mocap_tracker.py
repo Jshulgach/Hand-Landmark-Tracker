@@ -7,6 +7,7 @@ Calibration is loaded from the .npz file produced by calibration.py.
 """
 
 import time
+from mavis_track._lifecycle import cleanup_failed_start
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -86,22 +87,23 @@ class MultiCameraTracker:
     # Calibration
     # ------------------------------------------------------------------ #
     def load_calibration(self):
-        """Load camera calibration data from .npz file."""
-        try:
-            data = np.load(CALIBRATION_FILE, allow_pickle=True)
-            n = int(data["num_cameras"])
-
-            for idx in range(n):
-                self.camera_matrices.append(data[f"camera_matrix_{idx}"])
-                self.dist_coeffs.append(data[f"dist_coeffs_{idx}"])
-                self.R_matrices.append(data[f"R_{idx}"])
-                self.T_vectors.append(data[f"T_{idx}"])
-
-            self._compute_projection_matrices()
-            print(f"✓ Loaded calibration for {n} cameras from {CALIBRATION_FILE}")
-        except Exception as e:
-            print(f"✗ Error loading calibration: {e}")
-            raise
+        """Load validated camera matrices, resolving source identity and sizes."""
+        from mavis_track.calibration import load_camera_calibration
+        sizes = None
+        if self.cam_mgr is not None and hasattr(self.cam_mgr, "get_resolution"):
+            sizes = [self.cam_mgr.get_resolution(i) for i in range(self.num_cameras)]
+        elif self.img_width and self.img_height:
+            sizes = [(self.img_width, self.img_height)] * self.num_cameras
+        diagnostics = (self.cam_mgr.get_camera_diagnostics()
+                       if self.cam_mgr is not None and hasattr(self.cam_mgr, "get_camera_diagnostics") else None)
+        source_ids = getattr(self.cam_mgr, "camera_indices", None)
+        Ks, dists, Rs, Ts, verified = load_camera_calibration(
+            CALIBRATION_FILE, count=self.num_cameras, image_sizes=sizes,
+            camera_ids=source_ids, diagnostics=diagnostics)
+        self.camera_matrices, self.dist_coeffs = Ks, dists
+        self.R_matrices, self.T_vectors = Rs, Ts
+        self.calibration_identity_verified = verified
+        self._compute_projection_matrices()
 
     def _compute_projection_matrices(self):
         """P = K @ [R | T] for each camera."""
@@ -146,6 +148,7 @@ class MultiCameraTracker:
                 )
             raise RuntimeError(f"Failed to import mediapipe: {msg}{hint}") from exc
 
+    @cleanup_failed_start
     def initialize_cameras(
         self,
         min_det_conf=MIN_DETECTION_CONFIDENCE,
@@ -167,10 +170,14 @@ class MultiCameraTracker:
 
         if self.num_cameras == 0:
             print("No cameras detected.")
+            self.cleanup()
             return False
 
         self.cam_mgr.start_all()
-        self.camera_ids = list(range(self.num_cameras))
+        if hasattr(self.cam_mgr, "wait_ready"):
+            self.cam_mgr.wait_ready()
+        self.camera_ids = list(getattr(self.cam_mgr, "camera_indices", range(self.num_cameras)))
+        self.image_sizes = [self.cam_mgr.get_resolution(i) for i in range(self.num_cameras)]
 
         w, h = self.cam_mgr.get_resolution(0)
         self.img_width = w
@@ -236,7 +243,8 @@ class MultiCameraTracker:
     def capture_frames(self):
         """Grab the latest BGR frame from every camera via CameraManager."""
         t0 = time.perf_counter()
-        frames = self.cam_mgr.get_all_frames()
+        frames = (self.cam_mgr.get_fresh_frames() if hasattr(self.cam_mgr, "get_fresh_frames")
+                  else self.cam_mgr.get_all_frames(copy=False))
         self._capture_ms = (time.perf_counter() - t0) * 1000
         return frames
 
@@ -254,7 +262,10 @@ class MultiCameraTracker:
         # if cam_idx in UPSIDE_DOWN_CAMERAS:
         #     frame = cv2.rotate(frame, cv2.ROTATE_180)
 
+        if frame.shape[1] > 640:
+            frame = cv2.resize(frame, (640, round(frame.shape[0] * 640 / frame.shape[1])))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
         return detector.process(rgb)
 
     def detect_hands_all_cameras(self, frames):
@@ -293,6 +304,8 @@ class MultiCameraTracker:
         h, w = self.img_height, self.img_width
 
         for cam_idx, result in enumerate(results):
+            if hasattr(self, "image_sizes"):
+                w, h = self.image_sizes[cam_idx]
             if result is None or not result.multi_hand_landmarks:
                 all_landmarks_2d.append([])
                 conf_debug[cam_idx] = 0.0
@@ -321,7 +334,9 @@ class MultiCameraTracker:
                 # but we can use the z-coordinate (depth) or just the overall camera confidence as a fallback.
                 # For now, we'll use the overall camera confidence for all landmarks, but structure it
                 # so it can be easily updated if MediaPipe adds per-landmark confidence.
-                landmark_confs = [camera_conf] * self.num_landmarks
+                # Handedness probability is not a per-landmark visibility score.
+                # Geometric reprojection checks determine landmark validity.
+                landmark_confs = [1.0] * self.num_landmarks
 
                 # Normalised → pixel
                 landmarks_px = landmarks_norm * [w, h]
@@ -364,6 +379,9 @@ class MultiCameraTracker:
         else:
             active = list(range(self.num_cameras))
 
+        if any(len(all_landmarks_2d[i]) > 1 for i in active):
+            # Cross-view two-hand association is not implemented in this backend.
+            return []
         if len(active) < MIN_CAMERAS_FOR_TRIANGULATION:
             return []
 
@@ -884,7 +902,10 @@ class MultiCameraTracker:
         self._fps = 1.0 / dt if dt > 0 else 0.0
         self._t_prev = now
 
-        return frames, triangulated_hands, all_results, valid_2d_landmarks
+        display_frames = [frame if frame is not None else np.zeros(
+            (self.cam_mgr.get_resolution(i)[1], self.cam_mgr.get_resolution(i)[0], 3), np.uint8)
+            for i, frame in enumerate(frames)]
+        return display_frames, triangulated_hands, all_results, valid_2d_landmarks
 
     def get_fps_stats(self):
         return {
@@ -915,7 +936,7 @@ class MultiCameraTracker:
     def cleanup(self):
         """Release cameras, detectors, and thread pool."""
         if self._executor:
-            self._executor.shutdown(wait=False)
+            self._executor.shutdown(wait=True, cancel_futures=True)
             self._executor = None
 
         for hands in self.hands_detectors:

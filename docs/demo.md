@@ -1,6 +1,6 @@
 # Demo Playground
 
-Welcome to the live HandTrack demo space. This page is designed for quick, fun validation that your webcam and browser environment are ready before running the full desktop GUI flow.
+Welcome to the live MAVIS browser demo space. This page is designed for quick, fun validation that your webcam and browser environment are ready before running the desktop demo. This browser playground uses its own browser-side model; it does not validate the installed Python package.
 
 ## Interactive Camera Playground
 
@@ -106,8 +106,8 @@ Use the camera permission button, then try the two live modes.
 ## Run the Full Desktop Demo
 
 ```bash
-handtracker setup --backend webcam --run-calibration
-handtracker gui --backend webcam
+mavis-track demo
+mavis-track gui --backend webcam --advanced-hands
 ```
 
 ## Tips

@@ -1,120 +1,76 @@
-"""Replay saved landmark sessions from a recorded HandTrack bundle."""
-
-from __future__ import annotations
+"""Replay validated landmark sessions using their recorded timing."""
 
 import argparse
-from pathlib import Path
-from typing import Sequence
-
+import time
 import cv2
 import numpy as np
-
-from handtrack.io import SessionLoader
+from mavis_track import load_session
 from handtrack.tracker import get_hand_connections
 
 
-def _draw_landmarks(canvas: np.ndarray, landmarks: np.ndarray) -> None:
+def _draw_landmarks(canvas, landmarks, valid=None):
+    batch = np.asarray(landmarks)
+    if batch.ndim == 2:
+        batch = batch[None]
+    if batch.ndim != 3 or batch.shape[1:] != (21, 3):
+        raise ValueError("Expected (hands, 21, 3) landmarks")
+    if valid is None:
+        valid = np.isfinite(batch).all(axis=(1, 2)) & np.any(batch != 0, axis=(1, 2))
     height, width = canvas.shape[:2]
-    points: list[tuple[int, int]] = []
-    for x_coord, y_coord, _z_coord in landmarks:
-        x_pixel = int(np.clip(x_coord, 0.0, 1.0) * (width - 1))
-        y_pixel = int(np.clip(y_coord, 0.0, 1.0) * (height - 1))
-        points.append((x_pixel, y_pixel))
-
-    for start_idx, end_idx in get_hand_connections():
-        cv2.line(canvas, points[start_idx], points[end_idx], (0, 200, 255), 2)
-
-    for point in points:
-        cv2.circle(canvas, point, 4, (255, 255, 255), -1)
-
-
-def _build_canvas(width: int, height: int) -> np.ndarray:
-    canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    canvas[:] = (24, 24, 24)
-    return canvas
+    for hand, present in zip(batch, valid):
+        if not present:
+            continue
+        points = [tuple((np.clip(p[:2], 0, 1) * [width - 1, height - 1]).astype(int))
+                  if np.isfinite(p).all() else None for p in hand]
+        for a, b in get_hand_connections():
+            if points[a] is not None and points[b] is not None:
+                cv2.line(canvas, points[a], points[b], (0, 200, 255), 2)
+        for point in points:
+            if point is not None:
+                cv2.circle(canvas, point, 4, (255, 255, 255), -1)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Replay a recorded landmarks session as a 2D skeleton animation.",
-    )
-    parser.add_argument(
-        "session",
-        help="path to a session folder containing landmarks.npz",
-    )
-    parser.add_argument(
-        "--fps",
-        type=float,
-        default=None,
-        help="override playback rate; defaults to the session sampling rate",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=960,
-        help="window width in pixels",
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=720,
-        help="window height in pixels",
-    )
-    parser.add_argument(
-        "--loop",
-        action="store_true",
-        help="loop playback until Escape is pressed",
-    )
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("session")
+    parser.add_argument("--fps", type=float, default=None)
+    parser.add_argument("--width", type=int, default=960)
+    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--loop", action="store_true")
+    parser.add_argument("--no-display", action="store_true", help="validate and render without a window")
     args = parser.parse_args(argv)
-
-    session_dir = Path(args.session)
-    if not session_dir.exists():
-        print(f"[handtracker] Session folder not found: {session_dir}")
+    if min(args.width, args.height) <= 0 or (args.fps is not None and (not np.isfinite(args.fps) or args.fps <= 0)):
+        parser.error("dimensions and playback rate must be positive")
+    try:
+        session = load_session(args.session)
+        if session.coordinate_space != "image_normalized":
+            raise ValueError("2D replay requires image_normalized coordinates")
+        if not len(session.landmarks):
+            raise ValueError("Session has no frames")
+    except (OSError, ValueError) as exc:
+        print(f"[mavis] Cannot replay session: {exc}")
         return 1
-
-    loader = SessionLoader(str(session_dir), label="")
-    landmarks, sampling_rate, _time_vector = loader.load_landmarks()
-    if landmarks is None or sampling_rate is None:
-        print(f"[handtracker] No landmarks session found in: {session_dir}")
-        return 1
-
-    playback_fps = args.fps or sampling_rate
-    frame_delay_ms = max(1, int(round(1000.0 / max(playback_fps, 1e-6))))
-    landmarks = np.asarray(landmarks, dtype=np.float32)
-
-    window_name = "HandTrack Replay"
     try:
         while True:
-            for frame_index, frame_landmarks in enumerate(landmarks, start=1):
-                canvas = _build_canvas(args.width, args.height)
-                _draw_landmarks(canvas, frame_landmarks)
-                cv2.putText(
-                    canvas,
-                    f"Frame {frame_index}/{len(landmarks)} | {playback_fps:.1f} FPS",
-                    (16, 32),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 255, 255),
-                    2,
-                )
-                cv2.putText(
-                    canvas,
-                    "Press ESC to close",
-                    (16, args.height - 24),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (200, 200, 200),
-                    1,
-                )
-                cv2.imshow(window_name, canvas)
-                key = cv2.waitKey(frame_delay_ms) & 0xFF
-                if key == 27:
+            started = time.perf_counter()
+            for index, (points, valid) in enumerate(zip(session.landmarks, session.valid)):
+                canvas = np.full((args.height, args.width, 3), 24, np.uint8)
+                _draw_landmarks(canvas, points, valid)
+                if args.no_display:
+                    continue
+                cv2.imshow("MAVIS Replay", canvas)
+                target = (index + 1) / args.fps if args.fps else (
+                    session.time_vector[index + 1] - session.time_vector[0]
+                    if index + 1 < len(session.time_vector) else
+                    session.time_vector[index] - session.time_vector[0] + 1 / session.sampling_rate)
+                delay = max(1, int((target - (time.perf_counter() - started)) * 1000))
+                if cv2.waitKey(delay) & 0xFF == 27:
                     return 0
-
-            if not args.loop:
+            if not args.loop or args.no_display:
                 return 0
     finally:
-        cv2.destroyAllWindows()
+        if not args.no_display:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

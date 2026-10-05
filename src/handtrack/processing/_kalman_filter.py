@@ -12,9 +12,21 @@ class Kalman3D:
         self.P = np.eye(6)
         self.Q = np.eye(6) * process_noise
         self.R = np.eye(3) * measurement_noise
+        self._initialized = False
 
-    def update(self, z):
+    def update(self, z, dt=None):
         z = np.reshape(z, (3, 1))
+        if not np.isfinite(z).all():
+            raise ValueError("Kalman measurements must be finite")
+        if dt is not None:
+            if not np.isfinite(dt) or dt <= 0:
+                raise ValueError("dt must be positive finite seconds")
+            for i in range(3):
+                self.F[i, i+3] = dt
+        if not self._initialized:
+            self.x[:3] = z
+            self._initialized = True
+            return z.flatten().copy()
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         y = z - self.H @ self.x

@@ -49,14 +49,10 @@ class _DelayedCameraSdk:
 def test_optitrack_uses_core_backend_calibration_file():
     calibration = Path(config.CALIBRATION_FILE)
 
-    assert calibration.parts[-5:] == (
-        "handtrack",
-        "cameras",
-        "optitrack",
-        "calibration_data",
-        "multi_camera_calib_latest.npz",
-    )
-    assert calibration.is_file()
+    from mavis_track.calibration import default_calibration_dir
+    assert calibration.parent == default_calibration_dir("optitrack")
+    assert calibration.name == "multi_camera_calib_latest.npz"
+    # Installed packages must not depend on a developer's calibration fixture.
 
 
 def test_camera_acquisition_retries_every_missing_index(monkeypatch):

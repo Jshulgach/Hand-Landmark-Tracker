@@ -42,7 +42,7 @@ def test_gui_dispatches_to_selected_backend(monkeypatch):
 
     monkeypatch.setattr(_cli, "_run_module_entrypoint", fake_runner)
 
-    exit_code = _cli.main(["gui", "--backend", "webcam"])
+    exit_code = _cli.main(["gui", "--backend", "webcam", "--advanced-hands"])
 
     assert exit_code == 0
     assert called["module_name"] == "unity_hand_tracking.webcam.mocap_handracker_gui"

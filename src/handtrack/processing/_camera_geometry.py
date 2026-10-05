@@ -176,9 +176,10 @@ def build_dlt_matrix(
 ) -> np.ndarray:
     """Build the DLT measurement matrix A for a 3D point seen by N cameras.
 
-    This constructs the *same* A used by the existing ``_triangulate_n_views``
-    in ``mocap_tracker.py``, but here we evaluate it at a *known* 3D point
-    (projected to each camera) rather than from measured 2D detections.
+    Each row is divided by projected depth at the known point. The first
+    three columns are therefore the negative pixel projection Jacobian,
+    independent of arbitrary homogeneous scaling of each camera matrix.
+    This normalized matrix is for uncertainty evaluation, not raw DLT fitting.
 
     Parameters
     ----------
@@ -193,25 +194,23 @@ def build_dlt_matrix(
     rows = []
     for P in projection_matrices:
         proj = P @ pt_h
+        if not np.isfinite(proj).all() or abs(proj[2]) < 1e-12:
+            raise ValueError("Cannot evaluate a point at zero or nonfinite projected depth")
         u = proj[0] / proj[2]
         v = proj[1] / proj[2]
-        rows.append(u * P[2, :] - P[0, :])
-        rows.append(v * P[2, :] - P[1, :])
+        rows.append((u * P[2, :] - P[0, :]) / proj[2])
+        rows.append((v * P[2, :] - P[1, :]) / proj[2])
     return np.array(rows, dtype=np.float64)
 
 
 def triangulation_covariance(A: np.ndarray, sigma_px: float) -> np.ndarray:
     """3x3 covariance of the triangulated 3D point.
 
-    The DLT system AX = 0 is solved by the right singular vector of A
-    corresponding to the smallest singular value.  The 3D point in
-    Euclidean coordinates is X[:3]/X[3].  The uncertainty of this estimate
-    is derived by propagating pixel noise through the Jacobian of the
-    inhomogeneous system obtained by fixing the homogeneous scale.
-
-    We construct the inhomogeneous Jacobian J (2N x 3) by taking the
-    first three columns of A minus the fourth column scaled by the
-    projected coordinates, then compute  Cov = sigma^2 (J^T J)^{-1}.
+    A must be the depth-normalized matrix returned by build_dlt_matrix.
+    Its first three columns are the pixel residual Jacobian. Independent,
+    isotropic pixel noise propagates as Cov = sigma^2 (J^T J)^-1.
+    This is a local linear noise model; calibration error and detection
+    bias are separate sources of uncertainty.
 
     Parameters
     ----------
@@ -222,18 +221,14 @@ def triangulation_covariance(A: np.ndarray, sigma_px: float) -> np.ndarray:
     -------
     (3, 3) covariance matrix in world units squared.
     """
-    # Solve for the 3D point via SVD
-    _, s, Vh = np.linalg.svd(A)
-    X_h = Vh[-1]
-    if abs(X_h[3]) < 1e-15:
-        return np.full((3, 3), np.inf)
-    # Inhomogeneous Jacobian: derivative of (A[:,:3] x + A[:,3]) = 0
-    # at the solution x = X[:3]/X[3].  This gives J = A[:,:3] + outer product.
-    # Simpler equivalent: J_i = P_i[:2,:3] - u_i * P_i[2,:3] (row-pair per cam)
-    # which is exactly A[:, :3] when we substitute the projected coords.
-    # The Jacobian of the inhomogeneous system is the first 3 cols of A
-    # (since the 4th column encodes the constant term).
+    A = np.asarray(A, dtype=np.float64)
+    if A.ndim != 2 or A.shape[1] != 4 or A.shape[0] < 4 or not np.isfinite(A).all():
+        raise ValueError("A must be a finite depth-normalized (2N, 4) matrix")
+    if not np.isfinite(sigma_px) or sigma_px < 0:
+        raise ValueError("sigma_px must be finite and nonnegative")
     J = A[:, :3]
+    if np.linalg.matrix_rank(J) < 3:
+        return np.full((3, 3), np.inf)
     JtJ = J.T @ J
     try:
         JtJ_inv = np.linalg.inv(JtJ)

@@ -1,8 +1,7 @@
 #import os
 #import PyQt5
 #from PyQt5.QtWidgets import QApplication, QFileDialog
-import tkinter as tk
-from tkinter import filedialog
+
 
 
 def check_video_path(video_path=None):
@@ -22,6 +21,7 @@ def check_video_path(video_path=None):
     """
     # If no path was given, show file dialog
     if not video_path:
+        from tkinter import filedialog
         #root = tk.Tk()
         #root.withdraw()  # Hide the main window
         video_path = filedialog.askopenfilename()
