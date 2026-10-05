@@ -15,6 +15,10 @@ Native Mac/Linux webcam and visible desktop checks remain separate validation
 work. Apple Silicon's known MediaPipe wheel metadata warning is documented in
 `docs/troubleshooting.md`; native tracking still must succeed. For subsequent releases:
 
+CI runs automatically for pull requests and pushes to `main`, with one matrix
+per PR update. Manual CI can select a platform/Python version for investigation;
+the reusable validation used by publishing always runs the complete matrix.
+
 1. Review the implementation and the follow-up evidence in `AUDIT.md`.
 2. Run the complete CI matrix: Windows, Linux, Intel Mac, Apple Silicon Mac,
    Python 3.10–3.12. Each job builds a wheel, installs the base package,
