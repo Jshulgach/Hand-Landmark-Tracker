@@ -2,7 +2,7 @@
 
 Baseline assessed on October 4, 2026 against commit `d0981e4` on `main`. Implementation follow-up is on local branch `codex/mavis-tracking-release`.
 
-**Current assessment:** a working MAVIS release candidate now exists. The new public API, desktop paths, sessions, cleanup, calibration validation, optional dependencies, and release gates have been implemented. See the follow-up below for verified results and remaining external checks. The original findings are retained as baseline evidence.
+**Current assessment:** MAVIS 0.1.0 is published on PyPI and TestPyPI. The new public API, desktop paths, sessions, cleanup, calibration validation, optional dependencies, and release gates have been implemented. Downloaded public artifacts match the reviewed files and pass fresh Windows installation checks. See the follow-up below for verified results and remaining external checks. The original findings are retained as baseline evidence.
 
 The tracking foundation works. A built, installed package detected hands in existing demo videos on Windows and Linux, including two hands on Windows. A Windows webcam opened, supplied a frame, and closed successfully. At the baseline, recording failed, tests could not collect completely, several application imports were broken, and session formats and resource cleanup were inconsistent.
 
@@ -157,7 +157,11 @@ OptiTrack access is unnecessary for steps 1 through 5 or the webcam portion of s
 
 The release candidate uses `mavis-track` for distribution/CLI and `mavis_track`
 for the public import. Python support is explicitly 3.10–3.12, 64-bit.
-Publication has not occurred.
+Version 0.1.0 was published to PyPI and TestPyPI on October 4, 2026. Both
+indexes' downloaded wheel and source archive hashes match the reviewed local
+artifacts. Fresh Windows installs passed metadata, commands, module imports,
+and API/record/replay/export checks; the production GUI extra also passed
+dependency and Qt initialization checks.
 
 The pre-publication name change updates package metadata, imports, commands,
 calibration storage, documentation, examples, the lockfile, and publishing links.
@@ -204,9 +208,9 @@ MediaPipe's native/transitive dependencies; it is not a zero-dependency install.
    Python 3.10. Its configuration alone is not a completed platform check.
 2. Complete native Mac/Linux camera permissions, unplug/replug, codec, and display
    checks. Windows camera and offscreen checks do not establish other desktops.
-3. Configure trusted publishing, install the TestPyPI artifact as a fresh user,
-   then publish the reviewed first release and update the documentation's
-   pre-publication installation wording.
+3. Configure trusted publishing for future automated releases and deploy the
+   updated documentation after merging the release source. The first release
+   and its fresh TestPyPI/PyPI install checks are complete.
 4. Keep advanced limits explicit: one hand across calibrated views, no verified
    hardware exposure synchronization, no clinical-angle/absolute-precision claim,
    no current OptiTrack retest, and no new Unity JSON receiver validation.

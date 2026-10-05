@@ -3,7 +3,7 @@
 **Motion Analysis and Visual Interaction Suite** turns webcam, video, or
 caller-supplied frames into hand landmarks.
 
-The first release is being prepared as `mavis-track`. Start with the
+Version 0.1.0 is available on [PyPI](https://pypi.org/project/mavis-track/). Start with the
 [installation guide](installation.md), then run `mavis-track demo` for
 a desktop preview without calibration. The studio also provides face, pose,
 and holistic preview modes.

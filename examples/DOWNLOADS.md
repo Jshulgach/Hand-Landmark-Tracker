@@ -3,8 +3,8 @@
 This first-release bundle contains `mavis_webcam.py`, licenses, and the legacy
 Unity CSV bone-rotation listeners. SDK assets and recorded data are excluded.
 
-After the first release, install `mavis-track` with Python 3.10–3.12 and run
-`python mavis_webcam.py`. Until publication, install the repository with
+Install `mavis-track` from PyPI with Python 3.10–3.12 and run
+`python mavis_webcam.py`. For source development, install the repository with
 `python -m pip install .` instead.
 
 For the desktop studio, install the GUI extra and run `mavis-track demo`.

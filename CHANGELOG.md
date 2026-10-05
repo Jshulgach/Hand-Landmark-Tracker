@@ -2,7 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased — MAVIS release candidate
+## mavis-track 0.1.0 - 2026-10-04
+
+First public MAVIS release on [PyPI](https://pypi.org/project/mavis-track/0.1.0/).
 
 - Adopt `mavis-track`, `mavis_track`, and the MAVIS brand; retain legacy imports/commands.
 - Add a camera-free frame API with owned arrays, short-lived hand association, explicit coordinates/clocks, and context-managed cleanup.
@@ -19,7 +21,7 @@ All notable changes to this project will be documented in this file.
 - Add Windows/Linux/Intel Mac/Apple Silicon Mac, Python 3.10–3.12 release gates and installed-wheel smoke tests.
 - Document integration, compatibility limits, and outstanding native device validation.
 
-## 0.1.0 - 2026-05-13
+## 0.1.0 development baseline - 2026-05-13
 
 ### Added
 

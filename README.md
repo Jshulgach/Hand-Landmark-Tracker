@@ -8,9 +8,9 @@ Track hands from a webcam, video, or frames supplied by your own application.
 MAVIS provides a camera-free Python API, a desktop demo, recording and replay,
 CSV exports, and optional calibrated multi-camera and UDP/LSL workflows.
 
-**Release candidate:** the distribution name is `mavis-track`, the Python
-import is `mavis_track`, and the command is `mavis-track`. This checkout
-prepares the first release; it has not been published to PyPI yet.
+**Available on [PyPI](https://pypi.org/project/mavis-track/):** the distribution
+name is `mavis-track`, the Python import is `mavis_track`, and the command is
+`mavis-track`. Version 0.1.0 was published on October 4, 2026.
 Existing `handtrack` imports and the `handtracker` command remain available
 for compatibility.
 
@@ -20,11 +20,9 @@ Use Python **3.10–3.12, 64-bit**. The intended desktop platforms are Windows
 x64, Linux x64, and macOS Intel/Apple Silicon. The release validation matrix
 covers all four; camera permissions and native desktop behavior need device checks.
 
-Until publication, install from this repository:
+Create a virtual environment, then install the desktop extra:
 
 ```bash
-git clone https://github.com/Jshulgach/Hand-Landmark-Tracker.git
-cd Hand-Landmark-Tracker
 python -m venv .venv
 ```
 
@@ -32,7 +30,7 @@ Activate with `.venv\Scripts\activate` on Windows, or
 `source .venv/bin/activate` on macOS/Linux, then:
 
 ```bash
-python -m pip install ".[gui]"
+python -m pip install "mavis-track[gui]"
 mavis-track doctor --backend webcam
 mavis-track demo
 ```
@@ -40,13 +38,12 @@ mavis-track demo
 The demo starts with one camera and needs no calibration. Select hands, face,
 pose, or everything in the window. Use `--source 1` for another camera or
 `--source path/to/video.mp4` for a video.
-After the first PyPI release, installation will be
-`python -m pip install "mavis-track[gui]"`.
+For source development, clone this repository and install `.[gui]` instead.
 
 ## Include MAVIS in your project
 
 The base package does not require Qt, pandas, or LSL. Add `mavis-track`
-to your dependencies after publication, or install `.` locally now.
+to your project's dependencies, or install it with `python -m pip install mavis-track`.
 Pass frames from your existing capture loop:
 
 ```python

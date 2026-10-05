@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install ".[dev,docs,release]"
-      - run: python -m ruff check src/mavis_track scripts/consumer_smoke.py scripts/package_examples.py
+      - run: python -m ruff check src/mavis_track scripts/consumer_smoke.py scripts/package_examples.py scripts/check_release.py
       - run: python -m mypy src/mavis_track --ignore-missing-imports --follow-imports=skip
       - run: mkdocs build --strict
       - run: python -m build

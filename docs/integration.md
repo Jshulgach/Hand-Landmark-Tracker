@@ -97,7 +97,7 @@ include schema version, coordinate space, clock label, and hand count; missing
 numeric coordinates become JSON null. Configure the receiver to clear absent
 hands. UDP itself provides no delivery guarantee.
 
-LSL is optional (`.[stream]` locally or `mavis-track[stream]` after release).
+LSL is optional: install `mavis-track[stream]`, or `.[stream]` for source development.
 Construct `LSLBroadcaster(coordinate_space="image_normalized")` for frame API
 coordinates. Its legacy default is calibrated meters for stereo applications.
 LSL timestamps **must use `pylsl.local_clock()`**; do not pass video-relative,

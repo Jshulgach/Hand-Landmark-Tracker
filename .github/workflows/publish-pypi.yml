@@ -11,6 +11,8 @@ jobs:
   build:
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.publication.outputs.published }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,12 +21,16 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check dist/*
+      - name: Check for an existing PyPI release
+        id: publication
+        run: python scripts/check_release.py --index pypi
       - uses: actions/upload-artifact@v4
         with:
           name: python-package-distributions
           path: dist/
   publish:
     needs: build
+    if: needs.build.outputs.published != 'true'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -37,3 +43,5 @@ jobs:
           name: python-package-distributions
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

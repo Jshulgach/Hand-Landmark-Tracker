@@ -1,12 +1,10 @@
 # Installation
 
-MAVIS is preparing its first `mavis-track` release. Use this repository
-until publication. Python 3.10–3.12, 64-bit, is required; Python 3.13 and newer
+MAVIS 0.1.0 is available on [PyPI](https://pypi.org/project/mavis-track/).
+Python 3.10–3.12, 64-bit, is required; Python 3.13 and newer
 are excluded because the pinned MediaPipe release does not provide those wheels.
 
 ```bash
-git clone https://github.com/Jshulgach/Hand-Landmark-Tracker.git
-cd Hand-Landmark-Tracker
 python -m venv .venv
 ```
 
@@ -14,25 +12,25 @@ Activate on Windows with `.venv\Scripts\activate`; macOS/Linux use
 `source .venv/bin/activate`.
 
 ```bash
-python -m pip install ".[gui]"
+python -m pip install "mavis-track[gui]"
 mavis-track doctor --backend webcam
 mavis-track demo
 ```
 
-After publication, replace the local install with
-`python -m pip install "mavis-track[gui]"`.
+For source development, clone the repository and use
+`python -m pip install ".[gui]"` from its root instead.
 
 ## Choose dependencies
 
 | Install extra | Use |
 | --- | --- |
-| Base `.` | Frame API, recording, replay, CSV export, UDP |
-| `.[gui]` | Qt desktop demos and advanced visualization |
-| `.[stream]` / `.[lsl]` | LSL |
-| `.[io]` | pandas/YAML research utilities |
-| `.[applications]` | Matplotlib and serial application utilities |
-| `.[ml]` | Research machine learning tools, including PyTorch |
-| `.[optitrack]` | Python helpers; proprietary SDK obtained separately |
+| `mavis-track` | Frame API, recording, replay, CSV export, UDP |
+| `mavis-track[gui]` | Qt desktop demos and advanced visualization |
+| `mavis-track[stream]` / `mavis-track[lsl]` | LSL |
+| `mavis-track[io]` | pandas/YAML research utilities |
+| `mavis-track[applications]` | Matplotlib and serial application utilities |
+| `mavis-track[ml]` | Research machine learning tools, including PyTorch |
+| `mavis-track[optitrack]` | Python helpers; proprietary SDK obtained separately |
 | `.[dev,gui,io,stream,docs,release]` | Tests, docs, desktop checks, release tooling |
 
 Use only one OpenCV distribution. MAVIS selects `opencv-contrib-python`,

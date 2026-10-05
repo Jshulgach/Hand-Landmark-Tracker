@@ -1,8 +1,14 @@
 # MAVIS release checklist
 
 Distribution: `mavis-track`; import: `mavis_track`; version: 0.1.0.
-This local release candidate has not been published. The package name is not
-reserved by an availability lookup.
+Version 0.1.0 was published to [PyPI](https://pypi.org/project/mavis-track/0.1.0/)
+and [TestPyPI](https://test.pypi.org/project/mavis-track/0.1.0/) on October 4,
+2026. Both indexes' files match the reviewed artifacts. Fresh downloaded-wheel
+installs passed command, API, and record/replay/export checks on Windows;
+the production GUI extra also passed its dependency/Qt check.
+
+The full remote CI matrix and native Mac/Linux webcam checks remain separate
+validation work. For subsequent releases:
 
 1. Review the implementation and the follow-up evidence in `AUDIT.md`.
 2. Run the complete CI matrix: Windows, Linux, Intel Mac, Apple Silicon Mac,
@@ -20,9 +26,12 @@ reserved by an availability lookup.
    built wheel or the TestPyPI package with dependencies from PyPI.
 7. Check PyPI name availability again immediately before production publication.
 8. Publish a reviewed release. Both publishing workflows depend on the complete
-   CI workflow; they cannot bypass failed platform checks.
-9. Update installation prose from repository release candidate to published
-   package, tag notes with actual tested versions, and deploy documentation.
+   CI workflow; they cannot bypass failed platform checks. An index lookup skips
+   upload when all built filenames are already published. Partial uploads can
+   resume without re-uploading files that already exist.
+9. Update installation prose, tag notes with actual tested versions, and
+   deploy documentation. Repository README corrections after publication appear
+   in PyPI package metadata when included in a new package version.
 
 OptiTrack's historical Windows success is documented separately. No OptiTrack
 system is currently available for a fresh hardware retest. Do not delay the
@@ -39,7 +48,9 @@ Review any repository-history distribution obligations separately.
 
 ## Manual publication from Windows PowerShell
 
-Use the reviewed 0.1.0 source after the platform checks above. The following
+The following records the 0.1.0 publication procedure; that version is already
+uploaded and its files must not be uploaded again. For a new release, update the
+version and artifact paths below after completing the platform checks above. These
 commands build once, upload to TestPyPI, verify that download, and then upload
 the same files to PyPI. Stop if any command fails. Uploading is a separate
 manual action; these commands do not run the GitHub validation workflow.

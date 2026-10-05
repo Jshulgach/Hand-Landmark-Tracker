@@ -2,7 +2,11 @@
 
 ## One-Time Repository Setup
 
-Before the first public release:
+Version 0.1.0 is published on PyPI and TestPyPI. Fresh Windows installs of
+both downloaded releases passed the command, API, and recording/replay/export
+checks. The production GUI extra also passed its dependency/Qt check.
+
+For automated releases and documentation deployment:
 
 - create GitHub environments named `testpypi`, `pypi`, and `github-pages`
 - configure PyPI trusted publishing for the `Publish TestPyPI` and `Publish PyPI` workflows
@@ -43,6 +47,8 @@ Expected outcome:
 ## PyPI
 
 Promote to PyPI only after the TestPyPI artifact has been installed and smoke-tested.
+Both upload workflows first run the full CI matrix. Already-published files are
+skipped, so a GitHub release for the manually published 0.1.0 does not upload it again.
 
 ## Docs Deployment
 

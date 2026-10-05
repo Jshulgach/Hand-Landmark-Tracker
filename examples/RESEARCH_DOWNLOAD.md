@@ -6,11 +6,11 @@ This optional download contains experimental research workflows for:
 - Open Ephys session conversion and realtime prediction
 - learned motion smoothing with recurrent neural networks
 
-These scripts are provided as research references, not stable public APIs. Until publication, install `.[ml,io,stream]` from the repository. They
+These scripts are provided as research references, not stable public APIs. They
 may require optional scientific dependencies, project-specific configuration,
 and local datasets that are not distributed with HandTrack.
 
-After the first PyPI release, install the package and research dependencies:
+Install the package and research dependencies:
 
 ```bash
 python -m pip install "mavis-track[ml,io,stream]"
