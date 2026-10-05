@@ -17,8 +17,9 @@ for compatibility.
 ## Try the desktop demo
 
 Use Python **3.10–3.12, 64-bit**. The intended desktop platforms are Windows
-x64, Linux x64, and macOS Intel/Apple Silicon. The release validation matrix
-covers all four; camera permissions and native desktop behavior need device checks.
+x64, Linux x64, and macOS Intel/Apple Silicon. The software validation matrix
+passes on all four with Python 3.10–3.12; camera permissions and visible desktop
+behavior need device checks. See [the audit](AUDIT.md) for the evidence.
 
 Create a virtual environment, then install the desktop extra:
 

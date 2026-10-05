@@ -1,8 +1,8 @@
 # Hand Landmark Tracker public package audit
 
-Baseline assessed on October 4, 2026 against commit `d0981e4` on `main`. Implementation follow-up is on local branch `codex/mavis-tracking-release`.
+Baseline assessed on October 4, 2026 against commit `d0981e4` on `main`. Implementation follow-up is on branch `codex/mavis-tracking-release` and [pull request #1](https://github.com/Jshulgach/Hand-Landmark-Tracker/pull/1).
 
-**Current assessment:** MAVIS 0.1.0 is published on PyPI and TestPyPI. The new public API, desktop paths, sessions, cleanup, calibration validation, optional dependencies, and release gates have been implemented. Downloaded public artifacts match the reviewed files and pass fresh Windows installation checks. See the follow-up below for verified results and remaining external checks. The original findings are retained as baseline evidence.
+**Current assessment:** MAVIS 0.1.0 is published on PyPI and TestPyPI. The new public API, desktop paths, sessions, cleanup, calibration validation, optional dependencies, and release gates have been implemented. Downloaded public artifacts match the reviewed files and pass fresh Windows installation checks. Remote software validation passes on Windows, Linux, Intel Mac, and Apple Silicon Mac with Python 3.10–3.12. See the follow-up below for verified results and remaining external checks. The original findings are retained as baseline evidence.
 
 The tracking foundation works. A built, installed package detected hands in existing demo videos on Windows and Linux, including two hands on Windows. A Windows webcam opened, supplied a frame, and closed successfully. At the baseline, recording failed, tests could not collect completely, several application imports were broken, and session formats and resource cleanup were inconsistent.
 
@@ -189,11 +189,11 @@ Physical unplug/replug behavior remains a separate unverified device check.
 | Angles and geometry | Fourteen named geometric finger flexion triples replace cross-finger segments; degenerate geometry yields NaN. Initial filtering no longer pulls measurements toward zero. Covariance matches an independent finite-difference pixel Jacobian and a noisy triangulation simulation. Physical precision and clinical angle accuracy are unverified. |
 | Streaming | Hand-loss UDP packets and JSON nulls were received on loopback. LSL loopback received 126 channels with explicit normalized units and all-NaN hand-loss samples using local-clock timestamps. LSL discovery used a process-local machine/loopback configuration; external recorder/network integration is still unverified. |
 | Installation/content | Fresh base installs work without Qt, pandas, or LSL; one OpenCV distribution is selected. Notices and legacy Unity C# assets are included; SDK assets and runtime data are excluded from wheel/sdist/example downloads. Core examples are explicitly curated. 302 previously tracked SDK/native files were removed from Git's index while preserving local copies; old Git history remains. Unity CSV listeners do not consume MAVIS JSON packets. |
-| Release gates | Complete tests pass locally on Windows CPython 3.11 and Ubuntu/WSL CPython 3.12. The first remote run passed Windows/Linux on Python 3.10–3.12 and the quality job. It exposed two Mac validation issues described below; the corrected matrix is pending. Both publishing workflows depend on the complete matrix. |
+| Release gates | The corrected remote matrix passes all 12 OS/Python combinations: Windows, Linux, Intel Mac, and Apple Silicon Mac with Python 3.10–3.12. Each passes base-wheel consumer checks, desktop-extra dependency checks, and 115 software tests. The quality job also passes lint/type checks, strict docs, build/metadata checks, and curated examples. Both publishing workflows depend on the complete matrix. |
 
 The original software suite passed **103 tests on Windows and Linux**. Release
 publication and strict dependency-check regression tests bring the current local
-Windows suite to **115 passing tests**.
+Windows suite to **115 passing tests**, also passing in each remote platform job.
 Strict documentation build, scoped lint/type checks, wheel/sdist build, metadata
 checks, and curated example creation pass. The built artifacts are approximately
 0.22 MB and contain notices and Unity compatibility scripts with no SDK binaries,
@@ -222,16 +222,25 @@ the job. The [upstream metadata issue](https://github.com/google-ai-edge/mediapi
 also affects later MediaPipe releases; no runtime dependency or published 0.1.0
 artifact was changed to address these validation issues.
 
+The [corrected remote matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37257375975)
+completed successfully for commit `3374ca9`: all 12 platform jobs and the quality
+job passed. Native Apple Silicon tracking ran without translation. Mac validation
+includes installed frame processing, video record/replay/export, and offscreen Qt
+lifecycle tests. It does not establish camera permissions or visible desktop
+behavior. The consumer gate additionally uses 12 frames from the existing public
+mono demo to require positive hand inference and finite landmark arrays; this
+additional check passes locally against the published Windows wheel.
+
 ### Remaining release validation
 
-1. Run the configured remote CI matrix, particularly both Mac architectures and
-   Python 3.10. Its configuration alone is not a completed platform check.
-2. Complete native Mac/Linux camera permissions, unplug/replug, codec, and display
+1. Complete native Mac/Linux camera permissions, unplug/replug, and display
    checks. Windows camera and offscreen checks do not establish other desktops.
-3. Configure trusted publishing for future automated releases and deploy the
+   Generated MJPG recording/replay and the native video backend are covered by CI;
+   broader user-camera/codec combinations still need device checks.
+2. Configure trusted publishing for future automated releases and deploy the
    updated documentation after merging the release source. The first release
    and its fresh TestPyPI/PyPI install checks are complete.
-4. Keep advanced limits explicit: one hand across calibrated views, no verified
+3. Keep advanced limits explicit: one hand across calibrated views, no verified
    hardware exposure synchronization, no clinical-angle/absolute-precision claim,
    no current OptiTrack retest, and no new Unity JSON receiver validation.
 
@@ -241,6 +250,6 @@ package. Test evidence is retained under `%TEMP%/handtrack-audit-20261004` and
 
 ## Audit closure and retained evidence
 
-The software assessment is complete with the findings above recorded. A release should close the findings applicable to its advertised scope and obtain the native desktop checks in the platform table. Current uncertainty is explicit: native Mac behavior, native Linux camera/display behavior, synchronized physical multi-camera accuracy, positive face/pose tracking, external Unity/LSL receiver integration, and a current OptiTrack retest were not established.
+The software assessment is complete with the findings above recorded. A release should close the findings applicable to its advertised scope and obtain the native desktop checks in the platform table. Current uncertainty is explicit: native Mac/Linux camera and visible display behavior, physical unplug/replug, synchronized physical multi-camera accuracy, positive face/pose tracking, external Unity/LSL receiver integration, and a current OptiTrack retest were not established.
 
 Windows probe results and distributions are retained under `%TEMP%/handtrack-audit-20261004`; Linux installation and probe logs are under `/tmp/handtrack-audit-20261004-linux*`. These are temporary audit evidence, not package dependencies. Implementation now includes the source, regression tests, documentation, packaging, and workflow changes described below.

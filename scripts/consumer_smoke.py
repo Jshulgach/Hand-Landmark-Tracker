@@ -1,4 +1,5 @@
 """Exercise an installed wheel from outside the source checkout."""
+import argparse
 import json
 import subprocess
 import sys
@@ -13,7 +14,29 @@ import numpy as np
 from mavis_track import HandTracker, __version__, load_session
 
 
+def verify_positive_video(tracker, source):
+    capture = cv2.VideoCapture(str(source))
+    present = 0
+    try:
+        assert capture.isOpened(), "The positive-hand video could not be opened"
+        for _ in range(12):
+            ok, frame = capture.read()
+            assert ok, "The positive-hand video ended early"
+            result = tracker.process(frame)
+            for hand in result.hands:
+                assert hand.landmarks.shape == (21, 3)
+                assert np.isfinite(hand.landmarks).all()
+                present += 1
+        assert present > 0, "No hands were detected in the positive-hand video"
+    finally:
+        capture.release()
+    print(f"Positive video inference passed: {present} detected hand slots across 12 frames")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--video", type=Path, help="Existing positive-hand demo video for CI")
+    args = parser.parse_args()
     installed = distribution("mavis-track")
     assert installed.metadata["Name"] == "mavis-track"
     assert installed.version == __version__
@@ -28,6 +51,8 @@ def main():
         with HandTracker(max_hands=2) as tracker:
             result = tracker.process(np.zeros((240, 320, 3), np.uint8))
             assert result.hands == () and result.image_size == (320, 240)
+            if args.video:
+                verify_positive_video(tracker, args.video.resolve())
         clip = folder / "blank.avi"
         writer = cv2.VideoWriter(str(clip), cv2.VideoWriter_fourcc(*"MJPG"), 29.97, (320, 240))
         assert writer.isOpened()

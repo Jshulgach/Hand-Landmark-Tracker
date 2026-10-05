@@ -6,6 +6,13 @@ Version 0.1.0 is published on PyPI and TestPyPI. Fresh Windows installs of
 both downloaded releases passed the command, API, and recording/replay/export
 checks. The production GUI extra also passed its dependency/Qt check.
 
+The [remote software matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37257375975)
+passes on Windows, Linux, Intel Mac, and Apple Silicon Mac with Python 3.10–3.12,
+including 115 tests in each platform job and installed-wheel consumer checks.
+Native Mac/Linux webcam permissions and visible desktop behavior remain device
+checks. See [troubleshooting](troubleshooting.md) for MediaPipe's Apple Silicon
+wheel metadata warning and the required native runtime validation.
+
 For automated releases and documentation deployment:
 
 - create GitHub environments named `testpypi`, `pypi`, and `github-pages`

@@ -37,8 +37,9 @@ jobs:
         shell: bash
         run: |
           cp scripts/consumer_smoke.py "$RUNNER_TEMP/mavis_consumer.py"
+          cp docs/source/_static/mono_hand_track_test.mp4 "$RUNNER_TEMP/mavis-positive.mp4"
           cd "$RUNNER_TEMP"
-          python mavis_consumer.py
+          python mavis_consumer.py --video "$RUNNER_TEMP/mavis-positive.mp4"
       - name: Install test and desktop extras
         run: |
           python -m pip install ".[dev,gui,io,stream]"
