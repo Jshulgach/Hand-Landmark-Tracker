@@ -7,9 +7,10 @@ and [TestPyPI](https://test.pypi.org/project/mavis-track/0.1.0/) on October 4,
 installs passed command, API, and record/replay/export checks on Windows;
 the production GUI extra also passed its dependency/Qt check.
 
-The [full remote CI matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37257375975)
+The [full remote CI matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37258294168)
 passes on Windows, Linux, Intel Mac, and Apple Silicon Mac with Python 3.10–3.12:
-115 tests per platform job, installed-wheel consumer checks, and the quality job.
+115 tests per platform job, positive-hand video inference, installed-wheel
+consumer checks, and the quality job.
 Native Mac/Linux webcam and visible desktop checks remain separate validation
 work. Apple Silicon's known MediaPipe wheel metadata warning is documented in
 `docs/troubleshooting.md`; native tracking still must succeed. For subsequent releases:

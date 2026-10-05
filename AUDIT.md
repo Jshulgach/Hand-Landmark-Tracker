@@ -231,8 +231,13 @@ behavior. An added positive-inference check exposed zero detections on Intel Mac
 when processing the screen recording containing rendered hands and a small
 webcam inset. The follow-up uses 12 frames of the existing `HandDynamic.mp4`, with
 a real hand filling the camera view, and retains decoded-frame diagnostics on
-failure. This additional validation is pending on Intel Mac; the initial full
-software matrix above remains recorded separately.
+failure. The [positive-inference matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37258294168)
+completed successfully for commit `21cb5f7`: all 12 platform/Python jobs passed
+positive hand inference, installed recording/replay/export, desktop extras, and
+115 tests; the quality job passed as well. Intel Mac Python 3.11 detected one hand
+in all 12 frames using its native AVFoundation decoder. The screen-recording
+result remains an example of detection varying with input and platform; no
+universal detection or measurement-accuracy guarantee is implied.
 
 ### Remaining release validation
 
