@@ -5,6 +5,17 @@ on:
   pull_request:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to validate (automated release checks always use all)
+        type: choice
+        default: all
+        options: [all, windows-latest, ubuntu-latest, macos-15-intel, macos-15]
+      python:
+        description: Python version to validate
+        type: choice
+        default: all
+        options: [all, '3.10', '3.11', '3.12']
 permissions:
   contents: read
 concurrency:
@@ -15,8 +26,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-15-intel, macos-15]
-        python: ['3.10', '3.11', '3.12']
+        os: ${{ inputs.platform && inputs.platform != 'all' && fromJSON(format('["{0}"]', inputs.platform)) || fromJSON('["windows-latest", "ubuntu-latest", "macos-15-intel", "macos-15"]') }}
+        python: ${{ inputs.python && inputs.python != 'all' && fromJSON(format('["{0}"]', inputs.python)) || fromJSON('["3.10", "3.11", "3.12"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -37,15 +48,22 @@ jobs:
         shell: bash
         run: |
           cp scripts/consumer_smoke.py "$RUNNER_TEMP/mavis_consumer.py"
-          cp docs/source/_static/mono_hand_track_test.mp4 "$RUNNER_TEMP/mavis-positive.mp4"
+          cp docs/source/_static/HandDynamic.mp4 "$RUNNER_TEMP/mavis-positive.mp4"
           cd "$RUNNER_TEMP"
-          python mavis_consumer.py --video "$RUNNER_TEMP/mavis-positive.mp4"
+          python mavis_consumer.py --video "$RUNNER_TEMP/mavis-positive.mp4" --diagnostics "$RUNNER_TEMP/mavis-consumer-diagnostics"
       - name: Install test and desktop extras
         run: |
           python -m pip install ".[dev,gui,io,stream]"
           python scripts/check_dependencies.py
       - name: Run the complete software test suite
         run: python -m pytest -q
+      - name: Preserve public demo frame on a failed consumer check
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consumer-frame-${{ matrix.os }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/mavis-consumer-diagnostics/decoded-first.png
+          if-no-files-found: ignore
   quality:
     runs-on: ubuntu-latest
     steps:

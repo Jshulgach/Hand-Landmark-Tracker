@@ -227,9 +227,12 @@ completed successfully for commit `3374ca9`: all 12 platform jobs and the qualit
 job passed. Native Apple Silicon tracking ran without translation. Mac validation
 includes installed frame processing, video record/replay/export, and offscreen Qt
 lifecycle tests. It does not establish camera permissions or visible desktop
-behavior. The consumer gate additionally uses 12 frames from the existing public
-mono demo to require positive hand inference and finite landmark arrays; this
-additional check passes locally against the published Windows wheel.
+behavior. An added positive-inference check exposed zero detections on Intel Mac
+when processing the screen recording containing rendered hands and a small
+webcam inset. The follow-up uses 12 frames of the existing `HandDynamic.mp4`, with
+a real hand filling the camera view, and retains decoded-frame diagnostics on
+failure. This additional validation is pending on Intel Mac; the initial full
+software matrix above remains recorded separately.
 
 ### Remaining release validation
 

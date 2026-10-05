@@ -14,14 +14,22 @@ import numpy as np
 from mavis_track import HandTracker, __version__, load_session
 
 
-def verify_positive_video(tracker, source):
+def verify_positive_video(tracker, source, diagnostics=None):
     capture = cv2.VideoCapture(str(source))
     present = 0
     try:
         assert capture.isOpened(), "The positive-hand video could not be opened"
-        for _ in range(12):
+        print(f"Positive video backend: {capture.getBackendName()}; "
+              f"FFmpeg available: {cv2.videoio_registry.hasBackend(cv2.CAP_FFMPEG)}")
+        for index in range(12):
             ok, frame = capture.read()
             assert ok, "The positive-hand video ended early"
+            if index == 0:
+                print(f"First decoded frame: shape={frame.shape}, "
+                      f"channel means={frame.mean(axis=(0, 1)).tolist()}, std={frame.std()}")
+                if diagnostics:
+                    diagnostics.mkdir(parents=True, exist_ok=True)
+                    assert cv2.imwrite(str(diagnostics / "decoded-first.png"), frame)
             result = tracker.process(frame)
             for hand in result.hands:
                 assert hand.landmarks.shape == (21, 3)
@@ -36,6 +44,7 @@ def verify_positive_video(tracker, source):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--video", type=Path, help="Existing positive-hand demo video for CI")
+    parser.add_argument("--diagnostics", type=Path, help="Save a public demo frame for CI diagnostics")
     args = parser.parse_args()
     installed = distribution("mavis-track")
     assert installed.metadata["Name"] == "mavis-track"
@@ -52,7 +61,7 @@ def main():
             result = tracker.process(np.zeros((240, 320, 3), np.uint8))
             assert result.hands == () and result.image_size == (320, 240)
             if args.video:
-                verify_positive_video(tracker, args.video.resolve())
+                verify_positive_video(tracker, args.video.resolve(), args.diagnostics)
         clip = folder / "blank.avi"
         writer = cv2.VideoWriter(str(clip), cv2.VideoWriter_fourcc(*"MJPG"), 29.97, (320, 240))
         assert writer.isOpened()
