@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   platforms:
     strategy:
@@ -15,6 +18,7 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-15-intel, macos-15]
         python: ['3.10', '3.11', '3.12']
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -28,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build
           python -m pip install dist/*.whl
-          python -m pip check
+          python scripts/check_dependencies.py
       - name: Consumer smoke without desktop extras
         shell: bash
         run: |
@@ -36,7 +40,9 @@ jobs:
           cd "$RUNNER_TEMP"
           python mavis_consumer.py
       - name: Install test and desktop extras
-        run: python -m pip install ".[dev,gui,io,stream]"
+        run: |
+          python -m pip install ".[dev,gui,io,stream]"
+          python scripts/check_dependencies.py
       - name: Run the complete software test suite
         run: python -m pytest -q
   quality:
@@ -47,7 +53,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install ".[dev,docs,release]"
-      - run: python -m ruff check src/mavis_track scripts/consumer_smoke.py scripts/package_examples.py scripts/check_release.py
+      - run: python -m ruff check src/mavis_track scripts/consumer_smoke.py scripts/package_examples.py scripts/check_release.py scripts/check_dependencies.py
       - run: python -m mypy src/mavis_track --ignore-missing-imports --follow-imports=skip
       - run: mkdocs build --strict
       - run: python -m build

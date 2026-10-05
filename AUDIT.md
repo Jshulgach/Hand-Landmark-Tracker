@@ -189,9 +189,11 @@ Physical unplug/replug behavior remains a separate unverified device check.
 | Angles and geometry | Fourteen named geometric finger flexion triples replace cross-finger segments; degenerate geometry yields NaN. Initial filtering no longer pulls measurements toward zero. Covariance matches an independent finite-difference pixel Jacobian and a noisy triangulation simulation. Physical precision and clinical angle accuracy are unverified. |
 | Streaming | Hand-loss UDP packets and JSON nulls were received on loopback. LSL loopback received 126 channels with explicit normalized units and all-NaN hand-loss samples using local-clock timestamps. LSL discovery used a process-local machine/loopback configuration; external recorder/network integration is still unverified. |
 | Installation/content | Fresh base installs work without Qt, pandas, or LSL; one OpenCV distribution is selected. Notices and legacy Unity C# assets are included; SDK assets and runtime data are excluded from wheel/sdist/example downloads. Core examples are explicitly curated. 302 previously tracked SDK/native files were removed from Git's index while preserving local copies; old Git history remains. Unity CSV listeners do not consume MAVIS JSON packets. |
-| Release gates | Complete tests pass on Windows CPython 3.11 and Ubuntu/WSL CPython 3.12. CI now covers Windows/Linux/Intel Mac/Apple Silicon Mac with Python 3.10–3.12, including a built-wheel consumer test before desktop extras. Both publishing workflows depend on that matrix. Remote CI has not yet run for this branch. |
+| Release gates | Complete tests pass locally on Windows CPython 3.11 and Ubuntu/WSL CPython 3.12. The first remote run passed Windows/Linux on Python 3.10–3.12 and the quality job. It exposed two Mac validation issues described below; the corrected matrix is pending. Both publishing workflows depend on the complete matrix. |
 
-The full software suite currently passes **103 tests on Windows and Linux**.
+The original software suite passed **103 tests on Windows and Linux**. Release
+publication and strict dependency-check regression tests bring the current local
+Windows suite to **115 passing tests**.
 Strict documentation build, scoped lint/type checks, wheel/sdist build, metadata
 checks, and curated example creation pass. The built artifacts are approximately
 0.22 MB and contain notices and Unity compatibility scripts with no SDK binaries,
@@ -201,6 +203,24 @@ Integration now takes a few lines: `from mavis_track import HandTracker`, open
 a context manager, and call `tracker.process(frame)`. Capture, display, scheduling,
 and your application's event loop remain caller-owned. The base package still has
 MediaPipe's native/transitive dependencies; it is not a zero-dependency install.
+
+### Remote CI follow-up
+
+The [first remote matrix](https://github.com/Jshulgach/Hand-Landmark-Tracker/actions/runs/37256806112)
+passed Windows and Linux on Python 3.10, 3.11, and 3.12, plus the quality checks.
+Mac Intel installed and ran the public tracker and recording command, but its
+video backend rounded the generated 29.97 Hz clip to 30 Hz. The consumer test now
+checks preservation of the actual source-reported rate; fractional-rate behavior
+remains covered by portable session tests.
+
+Apple Silicon installed the universal2 MediaPipe 0.10.14 wheel, but `pip check`
+rejected its incorrect internal Intel-only tag. Inspection of the official wheel
+confirmed both Intel and ARM native binary slices. CI accepts only this exact
+version/platform warning and requires native model initialization and processing
+before continuing. Additional dependency errors and runtime failures still fail
+the job. The [upstream metadata issue](https://github.com/google-ai-edge/mediapipe/issues/6030)
+also affects later MediaPipe releases; no runtime dependency or published 0.1.0
+artifact was changed to address these validation issues.
 
 ### Remaining release validation
 

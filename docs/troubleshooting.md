@@ -19,6 +19,16 @@ mavis-track inspect-calibration --backend optitrack
 
 MAVIS currently depends on the classic `mediapipe.solutions` API. Use the pinned package version from `pyproject.toml`.
 
+On Apple Silicon, `pip check` can report `mediapipe 0.10.14 is not supported on
+this platform` even after a successful installation. The upstream universal2
+wheel contains native Intel and ARM code, but its internal wheel tag lists only
+Intel. [MediaPipe's upstream issue](https://github.com/google-ai-edge/mediapipe/issues/6030)
+also records this metadata problem in a later release. CI accepts only the exact
+0.10.14 warning on Apple Silicon and requires native model initialization and
+frame processing to succeed. Additional dependency errors still fail validation.
+Actual import or tracking failures need investigation; they are not covered by
+this metadata exception.
+
 ## OptiTrack SDK Not Found
 
 Set `OPTITRACK_CAM_PY_PATH` or place the compiled SDK module in the expected backend `Release` directory.
