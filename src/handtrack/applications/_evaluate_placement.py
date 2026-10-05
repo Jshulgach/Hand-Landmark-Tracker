@@ -106,7 +106,8 @@ def _load_calibration(backend: str) -> dict:
             f"Calibration file not found: {path}\n"
             f"Run  handtracker calibrate --backend {backend}  first."
         )
-    data = np.load(path, allow_pickle=True)
+    from mavis_track._files import load_npz
+    data = load_npz(path)
     n = int(data["num_cameras"])
     img_size = tuple(data["img_size"])
 

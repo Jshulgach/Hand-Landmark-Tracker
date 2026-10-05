@@ -41,7 +41,7 @@ def test_switching_mode_closes_previous_solution(monkeypatch):
     closed = []
 
     def create(self):
-        self._solution = SimpleNamespace(close=lambda: closed.append(self.mode))
+        self._solution = SimpleNamespace(close=lambda mode=self.mode: closed.append(mode))
 
     monkeypatch.setattr(MediaPipeModeTracker, "_create_solution", create)
     tracker = MediaPipeModeTracker("hands")

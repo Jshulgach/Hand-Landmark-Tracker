@@ -57,7 +57,8 @@ class SessionLoader:
         )
         if self.verbose:
             print(f"| Loading EMG data from {path}")
-        data = np.load(path, allow_pickle=True)
+        from mavis_track._files import load_npz
+        data = load_npz(path)
         emg = next((data[k] for k in ["emg_data", "amplifier_data"] if k in data), None)
         fs = int(
             next((data[k] for k in ["sampling_rate", "sample_rate"] if k in data), None)
@@ -113,10 +114,11 @@ class SessionLoader:
             print(f"|  Loading smoothed landmarks from {landmarks_path}")
 
         # Load smoothed landmarks from the .npz file
-        data = np.load(landmarks_path, allow_pickle=True)
-        landmarks = data["landmarks"]
-        fs = int(data.get("sampling_rate", 30))  # Default to 30 Hz if not specified
-        t = data.get("time_vector", np.arange(landmarks.shape[0]) / fs)
+        from mavis_track import load_session
+        session = load_session(landmarks_path)
+        landmarks = session.landmarks[:, 0] if session.legacy_single_hand else session.landmarks
+        fs = session.sampling_rate
+        t = session.time_vector
         if self.verbose:
             print(f"| Loaded landmarks: {landmarks.shape} landmarks at {fs} Hz.")
         return landmarks, fs, t

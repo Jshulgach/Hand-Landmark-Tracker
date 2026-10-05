@@ -14,7 +14,7 @@ Before cutting a release, run:
 
 ```bash
 python -m pytest -q
-handtracker --help
+mavis-track --help
 mkdocs build --strict
 python -m build
 python -m twine check dist/*
@@ -23,10 +23,10 @@ python -m twine check dist/*
 ## Hardware Smoke Commands
 
 ```bash
-handtracker doctor
-handtracker record --source 0 --frames 120 --save-video
-handtracker replay recordings/<session-name>
-handtracker export recordings/<session-name>
+mavis-track doctor
+mavis-track record --source 0 --frames 120 --save-video
+mavis-track replay recordings/<session-name>
+mavis-track export recordings/<session-name>
 ```
 
 ## TestPyPI

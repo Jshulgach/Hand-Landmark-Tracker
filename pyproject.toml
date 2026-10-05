@@ -1,15 +1,15 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "handtrack"
+name = "mavis-track"
 version = "0.1.0"
 description = "Hand landmark tracking, triangulation, kinematics, and streaming toolkit"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "Jonathan Shulgach", email = "jshulgac@andrew.cmu.edu" }]
 keywords = ["hand-tracking", "mediapipe", "optitrack", "kinematics", "lsl"]
 classifiers = [
@@ -19,20 +19,16 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
   "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
   "numpy>=1.24",
-  "opencv-python>=4.8",
+  "opencv-contrib-python>=4.8",
   "mediapipe==0.10.14",
   "scipy>=1.10",
-    "pandas>=2.0",
-    "PyYAML>=6.0",
-  "pylsl>=1.16",
-  "PyQt5>=5.15",
-  "pyqtgraph>=0.13",
-    "tqdm>=4.66",
+  "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
@@ -44,9 +40,11 @@ applications = ["matplotlib>=3.8", "pyserial>=3.5"]
 ml = ["scikit-learn>=1.4", "torch"]
 optitrack = ["psutil>=5.9"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
-docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5"]
 release = ["build>=1.2", "twine>=5.1"]
 all = [
+    "PyQt5>=5.15",
+    "pyqtgraph>=0.13",
     "matplotlib>=3.8",
     "pandas>=2.0",
     "psutil>=5.9",
@@ -65,20 +63,30 @@ Documentation = "https://jshulgach.github.io/Hand-Landmark-Tracker/"
 Changelog = "https://github.com/jshulgach/Hand-Landmark-Tracker/blob/main/CHANGELOG.md"
 
 [project.scripts]
+mavis-track = "handtrack.applications._cli:main"
+mavis-doctor = "handtrack.applications._doctor:main"
+mavis-inspect-calibration = "handtrack.applications._inspect_calibration:main"
 handtracker = "handtrack.applications._cli:main"
 handtrack-doctor = "handtrack.applications._doctor:main"
 handtrack-inspect-calibration = "handtrack.applications._inspect_calibration:main"
 handtrack-optitrack-gui = "unity_hand_tracking.optitrack_cam_py.mocap_handtrack_gui:main"
-handtrack-optitrack-calibrate = "unity_hand_tracking.optitrack_cam_py.calibration:main"
+handtrack-optitrack-calibrate = "handtrack.applications.optitrack_calibration:main"
 handtrack-optitrack-board = "unity_hand_tracking.optitrack_cam_py.generate_charuco_board:main"
 handtrack-optitrack-cameras = "unity_hand_tracking.optitrack_cam_py.multi_mjpeg:main"
 handtrack-optitrack-test-sender = "unity_hand_tracking.optitrack_cam_py.test_sender:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 
+[tool.setuptools.package-data]
+mavis_track = ["py.typed", "*.pyi"]
+unity_hand_tracking = ["*_Hand_Listener.cs"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.dll", "*.pyd", "*.lib", "*.exe", "*.npz", "*.csv", "*.pdf"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["handtrack*", "unity_hand_tracking*"]
+include = ["mavis_track*", "handtrack*", "unity_hand_tracking*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -10,6 +10,41 @@ Provides:
 import threading
 import time
 import math
+import os
+import subprocess
+
+from mavis_track._capture import FrameBuffer, snapshots
+
+
+def _get_windows_camera_count():
+    # This is a discovery hint; camera indices still need an actual open probe.
+    try:
+        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+            "@(Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in 'Camera','Image' }).Count"],
+            capture_output=True, text=True, timeout=3, creationflags=subprocess.CREATE_NO_WINDOW)
+        return max(0, int(result.stdout.strip()))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return 0
+
+
+def _default_candidate_indices():
+    count = _get_windows_camera_count() if os.name == "nt" else 0
+    return list(range(count or 6))
+
+
+def _get_candidate_indices(indices=None):
+    if indices is not None:
+        return list(dict.fromkeys(indices))
+    return list(dict.fromkeys(WEBCAM_INDICES)) or _default_candidate_indices()
+
+
+def _open_camera(index):
+    if os.name == "nt":
+        capture = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if capture.isOpened():
+            return capture
+        capture.release()
+    return cv2.VideoCapture(index)
 
 import cv2
 import numpy as np
@@ -30,7 +65,7 @@ except ImportError:
     )
 
 
-class CameraWorker(threading.Thread):
+class CameraWorker(FrameBuffer, threading.Thread):
     """Dedicated thread that continuously grabs the latest frame for one webcam."""
 
     def __init__(self, cam_index, exposure=None):
@@ -44,13 +79,10 @@ class CameraWorker(threading.Thread):
         self.cap = None
         self.width = 640
         self.height = 480
-
-    def get_frame(self):
-        """Return the latest BGR frame (copy), or a black placeholder."""
-        with self.lock:
-            if self.latest_frame is not None:
-                return self.latest_frame.copy()
-        return np.zeros((self.height, self.width, 3), np.uint8)
+        self.frame_timestamp = None
+        self.status = "starting"
+        self.error = ""
+        self.ready = threading.Event()
 
     def get_resolution(self):
         return self.width, self.height
@@ -71,13 +103,29 @@ class CameraWorker(threading.Thread):
         self.running = False
 
     def run(self):
-        cap = cv2.VideoCapture(self.cam_index, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(self.cam_index)
+        try:
+            self._capture()
+        except Exception as exc:
+            self.error = str(exc)
+            self.status = "failed"
+        finally:
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            self.running = False
+            self.ready.set()
 
+    def _capture(self):
+        cap = _open_camera(self.cam_index)
+        self.cap = cap
         if not cap.isOpened():
             print(f"[{self.name}] Failed to open webcam index {self.cam_index}")
             self.running = False
+            self.status = "failed"
+            self.error = "Camera unavailable"
+            cap.release()
+            self.cap = None
+            self.ready.set()
             return
 
         self.cap = cap
@@ -90,21 +138,26 @@ class CameraWorker(threading.Thread):
 
         ok, frame = cap.read()
         if ok and frame is not None:
-            self.height, self.width = frame.shape[:2]
-            with self.lock:
-                self.latest_frame = frame
+            self.publish_frame(frame)
 
         print(f"[{self.name}] Started at {self.width}x{self.height}")
 
-        while self.running:
-            ok, frame = cap.read()
-            if ok and frame is not None:
-                with self.lock:
-                    self.latest_frame = frame
-            time.sleep(0.002)
-
-        cap.release()
-        self.cap = None
+        try:
+            while self.running:
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    self.publish_frame(frame)
+                else:
+                    self.status = "waiting"
+                time.sleep(0.002)
+        except Exception as exc:
+            self.error = str(exc)
+            self.status = "failed"
+        finally:
+            cap.release()
+            self.cap = None
+            self.running = False
+            self.ready.set()
 
 
 class CameraManager:
@@ -144,15 +197,11 @@ class CameraManager:
 
     def __init__(self, indices=None):
         # If WEBCAM_INDICES is empty, probe a few default indices.
-        candidate_indices = list(indices) if indices is not None else list(WEBCAM_INDICES)
-        if not candidate_indices:
-            candidate_indices = list(range(6))
+        candidate_indices = _get_candidate_indices(indices)
 
         self.camera_indices = []
         for idx in candidate_indices:
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(idx)
+            cap = _open_camera(idx)
             opened = cap.isOpened()
             cap.release()
             if opened:
@@ -166,11 +215,18 @@ class CameraManager:
     def start_all(self, exposure=CAMERA_EXPOSURE, mjpeg_mode=None):
         """Create and start a CameraWorker for every detected webcam."""
         _ = mjpeg_mode
+        if self.workers:
+            return self.workers
         for cam_index in self.camera_indices:
             worker = CameraWorker(cam_index, exposure=exposure)
             worker.start()
             self.workers.append(worker)
             print(f"Started worker for webcam index {cam_index}")
+        for worker in self.workers:
+            worker.ready.wait(timeout=3)
+            if worker.frame_timestamp is None:
+                self.stop_all()
+                raise RuntimeError(f"{worker.name} did not provide a frame: {worker.error}")
         return self.workers
 
     def stop_all(self):
@@ -180,7 +236,10 @@ class CameraManager:
             worker.stop()
         for worker in self.workers:
             worker.join(timeout=3)
-        print("Cleanup complete.")
+        alive = [worker.name for worker in self.workers if worker.is_alive()]
+        if alive:
+            raise RuntimeError(f"Camera workers did not stop: {alive}")
+        self.workers.clear()
 
     def set_exposure(self, cam_index, value):
         """Set exposure for a worker by its local index in camera_indices."""
@@ -191,9 +250,18 @@ class CameraManager:
         """Return latest frame from a worker by local index."""
         return self.workers[cam_index].get_frame()
 
-    def get_all_frames(self):
+    def get_all_frames(self, copy=True):
         """Return all latest frames in worker order."""
-        return [worker.get_frame() for worker in self.workers]
+        frames = []
+        for worker in self.workers:
+            frame, _ = worker.get_snapshot()
+            if frame is None:
+                frame = np.zeros((worker.height, worker.width, 3), np.uint8)
+            frames.append(frame.copy() if copy else frame)
+        return frames
+
+    def get_fresh_frames(self):
+        return snapshots(self.workers)
 
     def get_grid(self, grid_cols=GRID_COLS, scale=DISPLAY_SCALE, overlay_labels=True):
         """Stitch all camera frames into a single grid image."""
@@ -201,6 +269,9 @@ class CameraManager:
         if not frames:
             return np.zeros((480, 640, 3), np.uint8)
 
+        width = max(frame.shape[1] for frame in frames)
+        height = max(frame.shape[0] for frame in frames)
+        frames = [cv2.resize(frame, (width, height)) for frame in frames]
         grid_cols = self._choose_grid_cols(len(frames), grid_cols)
 
         if overlay_labels:

@@ -4,8 +4,7 @@ from ._calibration_runtime import main as _run_calibration
 
 
 def main() -> int:
-    _run_calibration("webcam")
-    return 0
+    return _run_calibration("webcam")
 
 
 if __name__ == "__main__":

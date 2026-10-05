@@ -1,240 +1,171 @@
-"""Record landmarks and angles from a webcam or video source into a session bundle."""
+"""Record caller-owned capture through the public MAVIS frame API."""
 
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 from datetime import datetime
+import json
 from pathlib import Path
+import time
 from typing import Sequence
 
 import cv2
-import mediapipe as mp
 import numpy as np
 
-from handtrack.tracker import HandTracker
+from mavis_track import HandTracker
+from handtrack.processing._joint_angles import ANGLE_TRIPLES
 
 
 def _normalize_source(value: str):
     return int(value) if value.isdigit() else value
 
 
-def _default_session_name() -> str:
-    return datetime.now().strftime("session_%Y%m%d_%H%M%S")
-
-
-def _draw_overlay(frame, landmarks, filtered_landmarks) -> None:
-    if landmarks is not None:
-        mp.solutions.drawing_utils.draw_landmarks(
-            frame,
-            landmarks,
-            mp.solutions.hands.HAND_CONNECTIONS,
-        )
-
-    if filtered_landmarks is not None:
-        for x, y, _ in filtered_landmarks:
-            cv2.circle(
-                frame,
-                (int(x * frame.shape[1]), int(y * frame.shape[0])),
-                4,
-                (255, 255, 255),
-                -1,
-            )
-
-
-def _write_angles_csv(
-    path: Path, angle_names: list[str], timestamps: list[float], values: np.ndarray
-) -> None:
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["timestamp"] + angle_names)
-        for timestamp, row in zip(timestamps, values, strict=True):
-            writer.writerow([f"{timestamp:.6f}"] + [f"{value:.6f}" for value in row])
+def _draw_overlay(frame, result) -> None:
+    from handtrack.tracker import get_hand_connections
+    for hand in result.hands:
+        points = [(int(x * (frame.shape[1] - 1)), int(y * (frame.shape[0] - 1)))
+                  for x, y, _ in hand.landmarks]
+        for a, b in get_hand_connections():
+            cv2.line(frame, points[a], points[b], (0, 200, 255), 2)
+        for point in points:
+            cv2.circle(frame, point, 3, (255, 255, 255), -1)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Record landmarks and joint angles from a webcam or video source.",
-    )
-    parser.add_argument(
-        "--source",
-        default="0",
-        help="camera index or video path (default: webcam 0)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="recordings",
-        help="parent directory where the session folder should be created",
-    )
-    parser.add_argument(
-        "--session-name",
-        default=None,
-        help="optional session folder name; defaults to a timestamped name",
-    )
-    parser.add_argument(
-        "--frames",
-        type=int,
-        default=None,
-        help="maximum number of frames to record; defaults to all frames for video or 300 for webcam",
-    )
-    parser.add_argument(
-        "--save-video",
-        action="store_true",
-        help="also save an annotated MP4 alongside the data bundle",
-    )
-    parser.add_argument(
-        "--flip-frame",
-        action="store_true",
-        help="flip incoming frames horizontally before processing",
-    )
-    parser.add_argument(
-        "--max-hands",
-        type=int,
-        default=1,
-        help="maximum number of hands to detect",
-    )
-    parser.add_argument(
-        "--confidence",
-        type=float,
-        default=0.8,
-        help="minimum MediaPipe detection confidence",
-    )
-    parser.add_argument(
-        "--no-kalman",
-        action="store_true",
-        help="disable Kalman smoothing and save raw landmarks only",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="print additional tracker information while recording",
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", default="0", help="camera index or video path")
+    parser.add_argument("--output-dir", default="recordings")
+    parser.add_argument("--session-name", default=None)
+    parser.add_argument("--frames", type=int, default=None)
+    parser.add_argument("--save-video", action="store_true")
+    parser.add_argument("--flip-frame", action="store_true")
+    parser.add_argument("--max-hands", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--confidence", type=float, default=0.5)
+    parser.add_argument("--no-kalman", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
-
+    if args.frames is not None and args.frames <= 0:
+        parser.error("--frames must be positive")
+    if not np.isfinite(args.confidence) or not 0 <= args.confidence <= 1:
+        parser.error("--confidence must be between 0 and 1")
+    name = args.session_name or datetime.now().strftime("session_%Y%m%d_%H%M%S_%f")
+    if name in (".", "..") or Path(name).name != name or "/" in name or chr(92) in name:
+        parser.error("--session-name must be a folder name, without a path")
     source = _normalize_source(str(args.source))
-    session_name = args.session_name or _default_session_name()
-    session_dir = Path(args.output_dir) / session_name
-    session_dir.mkdir(parents=True, exist_ok=True)
-
-    tracker = HandTracker(
-        source=source,
-        max_hands=args.max_hands,
-        confidence=args.confidence,
-        apply_kalman=not args.no_kalman,
-        verbose=args.verbose,
-    )
-
-    fps = tracker.cap.get(cv2.CAP_PROP_FPS) or 30.0
-    default_frame_limit = None if tracker.mode == "video" else 300
-    frame_limit = args.frames if args.frames is not None else default_frame_limit
-
+    video = isinstance(source, str)
+    limit = args.frames if args.frames is not None else (None if video else 300)
+    session_dir = Path(args.output_dir) / name
+    if session_dir.exists():
+        print(f"[mavis] Session already exists: {session_dir}; choose a new name")
+        return 1
+    cap = cv2.VideoCapture(source)
+    tracker = None
     writer = None
-    raw_landmarks_log: list[np.ndarray] = []
-    filtered_landmarks_log: list[np.ndarray] = []
-    timestamps: list[float] = []
-    angle_rows: list[list[float]] = []
-    angle_names: list[str] | None = None
-
     try:
-        frame_index = 0
-        while tracker.cap.isOpened():
-            frame = tracker.get_image(flip_frame=args.flip_frame)
-            if frame is None:
+        if not cap.isOpened():
+            print(f"[mavis] Cannot open source {source!r}")
+            return 1
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        if not np.isfinite(fps) or fps <= 0:
+            fps = 30.0
+        tracker = HandTracker(max_hands=args.max_hands, confidence=args.confidence,
+                              mirrored=args.flip_frame, source_id=str(source),
+                              smoothing=not args.no_kalman)
+        session_dir.mkdir(parents=True, exist_ok=False)
+        raw_log, filtered_log, valid_log, id_log, labels_log, world_log = [], [], [], [], [], []
+        times, angle_log, angle_spaces = [], [], []
+        image_sizes_log = []
+        names = tuple(ANGLE_TRIPLES)
+        slots: dict[int, int] = {}
+        started = time.perf_counter()
+        while limit is None or len(times) < limit:
+            ok, frame = cap.read()
+            if not ok or frame is None:
                 break
-
-            landmarks, filtered_landmarks, angles, _results = tracker._process_frame(
-                frame
-            )
-
-            if landmarks is not None:
-                raw_landmarks = np.array(
-                    [[lm.x, lm.y, lm.z] for lm in landmarks.landmark],
-                    dtype=np.float32,
-                )
+            captured = time.perf_counter()
+            if args.flip_frame:
+                frame = cv2.flip(frame, 1)
+            if video:
+                pts = float(cap.get(cv2.CAP_PROP_POS_MSEC)) / 1000
+                stamp = pts if np.isfinite(pts) and pts >= 0 and (not times or pts > times[-1]) else len(times) / fps
+                if times and stamp <= times[-1]:
+                    stamp = times[-1] + 1 / fps
             else:
-                raw_landmarks = np.zeros((21, 3), dtype=np.float32)
-
-            raw_landmarks_log.append(raw_landmarks)
-            filtered_landmarks_log.append(
-                np.array(filtered_landmarks, dtype=np.float32)
-            )
-
-            timestamp = frame_index / fps
-            timestamps.append(timestamp)
-
-            if angle_names is None:
-                angle_names = list(angles.keys())
-            angle_rows.append([float(angles[name]) for name in angle_names])
-
+                stamp = captured - started
+            result = tracker.process(frame, timestamp=stamp)
+            shape = (args.max_hands, 21, 3)
+            raw, filtered, world = (np.full(shape, np.nan, np.float32) for _ in range(3))
+            valid = np.zeros(args.max_hands, bool)
+            ids = np.full(args.max_hands, -1, np.int64)
+            labels = np.full(args.max_hands, "Unknown", dtype="U7")
+            angles = np.full((args.max_hands, len(names)), np.nan, np.float32)
+            angle_space = np.full(args.max_hands, "absent", dtype="U20")
+            present = {hand.track_id for hand in result.hands}
+            slots = {key: slot for key, slot in slots.items() if key in present}
+            for hand in result.hands:
+                if hand.track_id not in slots:
+                    slots[hand.track_id] = next(i for i in range(args.max_hands) if i not in slots.values())
+                slot = slots[hand.track_id]
+                raw[slot], filtered[slot] = hand.raw_landmarks, hand.landmarks
+                if hand.world_landmarks is not None:
+                    world[slot] = hand.world_landmarks
+                valid[slot], ids[slot], labels[slot] = True, hand.track_id, hand.handedness
+                angles[slot] = [hand.angles[name] for name in names]
+                angle_space[slot] = hand.angle_space
+            raw_log.append(raw)
+            filtered_log.append(filtered)
+            world_log.append(world)
+            valid_log.append(valid)
+            id_log.append(ids)
+            labels_log.append(labels)
+            times.append(stamp)
+            angle_log.append(angles)
+            angle_spaces.append(angle_space)
+            image_sizes_log.append(result.image_size)
+            if args.verbose:
+                print(f"Frame {len(times)}: {len(result.hands)} hand(s), {stamp:.3f} s")
             if args.save_video:
                 if writer is None:
-                    height, width = frame.shape[:2]
-                    video_path = session_dir / "annotated.mp4"
-                    writer = cv2.VideoWriter(
-                        str(video_path),
-                        cv2.VideoWriter_fourcc(*"mp4v"),
-                        fps,
-                        (width, height),
-                    )
+                    writer = cv2.VideoWriter(str(session_dir / "annotated.mp4"),
+                                             cv2.VideoWriter_fourcc(*"mp4v"), fps,
+                                             (frame.shape[1], frame.shape[0]))
+                    if not writer.isOpened():
+                        raise RuntimeError("Cannot create annotated video with this codec")
                 annotated = frame.copy()
-                _draw_overlay(annotated, landmarks, filtered_landmarks)
+                _draw_overlay(annotated, result)
                 writer.write(annotated)
-
-            frame_index += 1
-            if frame_limit is not None and frame_index >= frame_limit:
-                break
-
-        raw_landmarks_np = np.asarray(raw_landmarks_log, dtype=np.float32)
-        filtered_landmarks_np = np.asarray(filtered_landmarks_log, dtype=np.float32)
-        angle_values_np = np.asarray(angle_rows, dtype=np.float32)
-        time_vector_np = np.asarray(timestamps, dtype=np.float64)
-
-        np.savez(
-            session_dir / "landmarks.npz",
-            raw_landmarks=raw_landmarks_np,
-            landmarks=filtered_landmarks_np,
-            angle_names=np.asarray(angle_names or [], dtype=str),
-            angle_values=angle_values_np,
-            sampling_rate=fps,
-            total_frames=filtered_landmarks_np.shape[0],
-            time_vector=time_vector_np,
-            source=str(source),
-            mode=tracker.mode,
-            apply_kalman=not args.no_kalman,
-        )
-
-        if angle_names:
-            _write_angles_csv(
-                session_dir / "angles.csv",
-                angle_names,
-                timestamps,
-                angle_values_np,
-            )
-
-        manifest = {
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "source": str(source),
-            "mode": tracker.mode,
-            "sampling_rate": fps,
-            "frame_count": int(filtered_landmarks_np.shape[0]),
-            "apply_kalman": not args.no_kalman,
-            "save_video": args.save_video,
-            "session_dir": str(session_dir),
-        }
-        (session_dir / "session.json").write_text(
-            json.dumps(manifest, indent=2),
-            encoding="utf-8",
-        )
-
-        print(f"[handtracker] Recorded session: {session_dir}")
-        print(f"[handtracker] Frames saved: {filtered_landmarks_np.shape[0]}")
+        count = len(times)
+        if not count:
+            print("[mavis] Source supplied no readable frames; no session bundle was saved")
+            return 1
+        rate = fps if video or count < 2 else (count - 1) / (times[-1] - times[0])
+        np.savez_compressed(session_dir / "landmarks.npz", schema_version=1,
+                            landmarks=np.asarray(filtered_log), raw_landmarks=np.asarray(raw_log),
+                            world_landmarks=np.asarray(world_log), valid=np.asarray(valid_log),
+                            image_sizes=np.asarray(image_sizes_log, dtype=np.int64),
+                            track_ids=np.asarray(id_log), handedness=np.asarray(labels_log),
+                            angle_names=np.asarray(names), angle_values=np.asarray(angle_log), angle_space=np.asarray(angle_spaces),
+                            sampling_rate=rate, time_vector=np.asarray(times), total_frames=count,
+                            coordinate_space="image_normalized", world_coordinate_space="hand_world_meters",
+                            timestamp_clock="video_pts" if video else "capture_relative",
+                            source=str(source), apply_kalman=not args.no_kalman)
+        manifest = {"schema_version": 1, "created_at": datetime.now().isoformat(timespec="seconds"),
+                    "source": str(source), "frame_count": count, "max_hands": args.max_hands,
+                    "sampling_rate": rate, "coordinate_space": "image_normalized",
+                    "timestamp_clock": "video_pts" if video else "capture_relative",
+                    "apply_kalman": not args.no_kalman, "save_video": args.save_video}
+        (session_dir / "session.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"[mavis] Recorded {count} frames: {session_dir}")
         return 0
+    except (ValueError, RuntimeError, OSError, cv2.error) as exc:
+        print(f"[mavis] Recording failed: {exc}")
+        return 1
     finally:
-        tracker.cap.release()
+        cap.release()
+        if tracker is not None:
+            tracker.close()
         if writer is not None:
             writer.release()
-        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

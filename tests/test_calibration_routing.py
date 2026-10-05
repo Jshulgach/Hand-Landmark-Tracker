@@ -38,7 +38,7 @@ def test_load_backend_rejects_unknown_backend():
         _calibration_runtime._load_backend("unknown")
 
 
-def test_failed_quality_candidate_is_published_with_warnings(
+def test_failed_quality_candidate_preserves_previous_calibration(
     monkeypatch, tmp_path, capsys
 ):
     published = tmp_path / "latest.npz"
@@ -59,18 +59,10 @@ def test_failed_quality_candidate_is_published_with_warnings(
         candidate_heldout_rms=np.array([2.0]),
     )
 
-    _calibration_runtime.save_calibration(
-        1,
-        (1280, 1024),
-        30,
-        [np.eye(3)],
-        [np.zeros((1, 5))],
-        [np.eye(3)],
-        [np.zeros((3, 1))],
-        intrinsic_results=[result],
-    )
-
-    data = np.load(published)
-    assert data["num_cameras"].item() == 1
-    assert "publishing with warnings" in capsys.readouterr().out
-    assert not (tmp_path / "latest.npz.candidate.npz").exists()
+    with pytest.raises(ValueError, match="previous calibration preserved"):
+        _calibration_runtime.save_calibration(
+            1, (1280, 1024), 30, [np.eye(3)], [np.zeros((1, 5))],
+            [np.eye(3)], [np.zeros((3, 1))], intrinsic_results=[result])
+    assert published.read_bytes() == b"known-good-calibration"
+    with np.load(tmp_path / "latest.npz.candidate.npz", allow_pickle=False) as data:
+        assert not data["quality_passed"].item()

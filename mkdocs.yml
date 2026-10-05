@@ -1,4 +1,4 @@
-site_name: HandTrack
+site_name: MAVIS
 site_description: Hand landmark tracking, calibration, and streaming toolkit.
 site_url: https://jshulgach.github.io/Hand-Landmark-Tracker/
 repo_url: https://github.com/jshulgach/Hand-Landmark-Tracker
@@ -42,6 +42,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Integration: integration.md
   - CLI: cli.md
   - Backends: backends.md
   - Troubleshooting: troubleshooting.md

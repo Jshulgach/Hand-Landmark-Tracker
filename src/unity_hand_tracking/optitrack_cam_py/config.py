@@ -1,4 +1,5 @@
 import os
+from mavis_track.calibration import default_calibration_dir
 import sys
 from pathlib import Path
 
@@ -70,7 +71,7 @@ ARUCO_DICT = "DICT_5X5_250"  # ArUco dictionary type
 # source tree.
 CALIBRATION_DIR = os.environ.get(
     "HANDTRACK_OPTITRACK_CALIBRATION_DIR",
-    str(_CORE_OPTITRACK_DIR / "calibration_data"),
+    str(default_calibration_dir("optitrack")),
 )
 CALIBRATION_FILE = os.environ.get(
     "HANDTRACK_OPTITRACK_CALIBRATION_FILE",

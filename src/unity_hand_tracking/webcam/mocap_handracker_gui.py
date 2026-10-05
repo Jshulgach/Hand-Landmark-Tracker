@@ -857,13 +857,13 @@ class StereoHandTrackerGUI(QMainWindow):
         if self.broadcaster:
             self.broadcaster.close()
             self.broadcaster = None
+        if self.lsl_broadcaster:
+            self.lsl_broadcaster.close()
         self.lsl_broadcaster = None
         self.udp_status.setText("Broadcasting: Disabled")
         self.udp_status.setStyleSheet("color: #888;")
 
     def broadcast_landmarks(self, frame_landmarks, num_hands):
-        if not frame_landmarks:
-            return
         if not (self.broadcaster or self.lsl_broadcaster):
             return
         hands_data = []
@@ -899,8 +899,6 @@ class StereoHandTrackerGUI(QMainWindow):
             )
 
     def broadcast_joint_angles(self, hand_angle_packets):
-        if not hand_angle_packets:
-            return
         if not (self.broadcaster or self.lsl_broadcaster):
             return
 
@@ -1123,6 +1121,8 @@ class StereoHandTrackerGUI(QMainWindow):
             # Start GUI refresh timer (~60 Hz display rate)
             self.timer.start(16)
         except Exception as e:
+            self.stop_tracking()
+            self.stop_udp_broadcast()
             self.status_label.setText(f"Status: Error - {str(e)}")
             print(f"Error starting tracker: {e}")
 
@@ -1152,8 +1152,9 @@ class StereoHandTrackerGUI(QMainWindow):
             return
         # Check if processing thread died unexpectedly
         if not self._proc_thread.is_alive():
-            print("[GUI] Processing thread died — stopping.")
+            error = self._proc_thread.error or "Processing stopped"
             self.stop_tracking()
+            self.status_label.setText(f"Status: {error}")
             return
         try:
             latest = self._proc_thread.get_latest()
@@ -1224,7 +1225,7 @@ class StereoHandTrackerGUI(QMainWindow):
                 for k, v in list(joint_angles.items()):
                     if not np.isfinite(v):
                         nan_count += 1
-                        joint_angles[k] = 0.0
+                        joint_angles[k] = np.nan
                 now = time.time()
                 if hand_idx == 0 and now - self._last_angle_log > 2.0:
                     self._last_angle_log = now
@@ -1252,10 +1253,8 @@ class StereoHandTrackerGUI(QMainWindow):
                     )
             # Broadcast
             if self.udp_enabled or self.lsl_broadcaster:
-                if frame_landmarks:
-                    self.broadcast_landmarks(frame_landmarks, num_hands)
-                if hand_angle_packets:
-                    self.broadcast_joint_angles(hand_angle_packets)
+                self.broadcast_landmarks(frame_landmarks, num_hands)
+                self.broadcast_joint_angles(hand_angle_packets)
             # Display frames
             for idx, (frame, results) in enumerate(zip(frames, all_results)):
                 if frame is None or idx >= len(self.video_labels):

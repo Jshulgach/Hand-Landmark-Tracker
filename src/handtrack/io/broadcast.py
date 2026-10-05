@@ -9,11 +9,25 @@ import numpy as np
 
 # Try importing pysl, but make it optional
 try:
-    from pylsl import StreamInfo, StreamOutlet
+    from pylsl import StreamInfo, StreamOutlet, local_clock
 
     LSL_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, RuntimeError):
     LSL_AVAILABLE = False
+
+
+def _json_values(value):
+    if isinstance(value, np.ndarray):
+        return _json_values(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_values(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_values(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_values(item) for item in value]
+    return value
 
 
 class DataBroadcaster:
@@ -35,7 +49,12 @@ class DataBroadcaster:
 class UDPBroadcaster(DataBroadcaster):
     """Broadcasts data via UDP packets (JSON)."""
 
-    def __init__(self, ip="127.0.0.1", port_landmarks=5005, port_angles=5010):
+    def __init__(self, ip="127.0.0.1", port_landmarks=5005, port_angles=5010,
+                 coordinate_space="calibrated_world_meters", timestamp_clock="lsl_local_clock"):
+        if coordinate_space not in ("image_normalized", "calibrated_world_meters"):
+            raise ValueError("Unknown coordinate space")
+        self.coordinate_space = coordinate_space
+        self.timestamp_clock = timestamp_clock
         super().__init__()
         self.ip = ip
         self.port_landmarks = port_landmarks
@@ -51,9 +70,6 @@ class UDPBroadcaster(DataBroadcaster):
         Broadcast hand landmarks.
         hands_data: list of dicts with 'hand_index' and 'landmarks' (list of [x,y,z])
         """
-        if not hands_data:
-            return
-
         payload = {
             "frame": frame_count,
             "timestamp": timestamp,
@@ -62,7 +78,8 @@ class UDPBroadcaster(DataBroadcaster):
         }
 
         try:
-            msg = json.dumps(payload).encode("utf-8")
+            msg = json.dumps(_json_values(dict(payload, schema_version=1, coordinate_space=self.coordinate_space,
+                timestamp_clock=self.timestamp_clock)), allow_nan=False).encode("utf-8")
             self.socket.sendto(msg, (self.ip, self.port_landmarks))
         except Exception as e:
             print(f"UDP Landmark Error: {e}")
@@ -72,13 +89,11 @@ class UDPBroadcaster(DataBroadcaster):
         Broadcast joint angles.
         hands_data: list of dicts with 'hand_index' and 'angles' (dict of name->angle)
         """
-        if not hands_data:
-            return
-
         payload = {"frame": frame_count, "timestamp": timestamp, "hands": hands_data}
 
         try:
-            msg = json.dumps(payload).encode("utf-8")
+            msg = json.dumps(_json_values(dict(payload, schema_version=1, angle_unit="degrees",
+                timestamp_clock=self.timestamp_clock)), allow_nan=False).encode("utf-8")
             self.socket.sendto(msg, (self.ip, self.port_angles))
         except Exception as e:
             print(f"UDP Angle Error: {e}")
@@ -97,8 +112,12 @@ class LSLBroadcaster(DataBroadcaster):
         stream_name="HandTracker",
         source_id="hand_tracker_01",
         include_splay=True,
+        coordinate_space="calibrated_world_meters",
     ):
         super().__init__()
+        if coordinate_space not in ("image_normalized", "calibrated_world_meters"):
+            raise ValueError("Unknown coordinate space")
+        self.coordinate_space = coordinate_space
         if not LSL_AVAILABLE:
             print("Warning: pylsl not installed. LSL broadcasting will be disabled.")
             self.outlet_landmarks = None
@@ -127,7 +146,7 @@ class LSLBroadcaster(DataBroadcaster):
                 for axis in ["x", "y", "z"]:
                     chan = channels.append_child("channel")
                     chan.append_child_value("label", f"Hand{hand_idx}_L{i}_{axis}")
-                    chan.append_child_value("unit", "meters")
+                    chan.append_child_value("unit", "meters" if coordinate_space == "calibrated_world_meters" else "normalized")
                     chan.append_child_value("type", "position")
 
         self.outlet_landmarks = StreamOutlet(info_lm)
@@ -164,6 +183,12 @@ class LSLBroadcaster(DataBroadcaster):
             "float32",
             f"{source_id}_ang",
         )
+        channels = info_ang.desc().append_child("channels")
+        for hand in range(2):
+            for key in self.angle_keys:
+                channel = channels.append_child("channel")
+                channel.append_child_value("label", f"Hand{hand}_{key}")
+                channel.append_child_value("unit", "degrees")
         self.outlet_angles = StreamOutlet(info_ang)
 
         print(
@@ -180,11 +205,14 @@ class LSLBroadcaster(DataBroadcaster):
 
         for hand in hands_data:
             idx = hand.get("hand_index", 0)
-            if idx >= 2:
+            if idx < 0 or idx >= 2:
                 continue  # Limit to 2 hands for fixed stream
 
             landmarks = hand.get("landmarks", [])
-            flat_lm = np.array(landmarks).flatten()
+            points = np.asarray(landmarks, dtype=float)
+            if points.shape != (21, 3):
+                raise ValueError("LSL landmarks must have shape (21, 3)")
+            flat_lm = points.flatten()
 
             start_pos = idx * (21 * 3)
             end_pos = start_pos + len(flat_lm)
@@ -203,7 +231,7 @@ class LSLBroadcaster(DataBroadcaster):
 
         for hand in hands_data:
             idx = hand.get("hand_index", 0)
-            if idx >= 2:
+            if idx < 0 or idx >= 2:
                 continue
 
             angles = hand.get("angles", {})
@@ -213,3 +241,8 @@ class LSLBroadcaster(DataBroadcaster):
                     sample[idx * len(self.angle_keys) + i] = angles[key]
 
         self.outlet_angles.push_sample(sample, timestamp)
+
+    def close(self):
+        # pylsl outlets release their native handles when their references end.
+        self.outlet_landmarks = None
+        self.outlet_angles = None

@@ -73,30 +73,19 @@ class MultiCameraTracker:
         self.load_calibration()
         
     def load_calibration(self):
-        """Load camera calibration data."""
-        if not os.path.exists(self.calibration_file):
-            raise FileNotFoundError(f"Calibration file not found: {self.calibration_file}")
+        from mavis_track.calibration import load_camera_calibration
+        Ks, dists, Rs, Ts, verified = load_camera_calibration(
+            self.calibration_file, count=self.num_cameras,
+            image_sizes=[(self.width, self.height)] * self.num_cameras,
+            camera_ids=self.camera_ids)
+        self.camera_matrices, self.dist_coeffs = Ks, dists
+        self.R_matrices, self.T_vectors = Rs, Ts
+        self.calibration_identity_verified = verified
+        self._compute_projection_matrices()
 
-        try:
-            calib_data = np.load(self.calibration_file, allow_pickle=True)
-            
-            for idx in range(self.num_cameras):
-                self.camera_matrices.append(calib_data[f'camera_matrix_{idx}'])
-                self.dist_coeffs.append(calib_data[f'dist_coeffs_{idx}'])
-                self.R_matrices.append(calib_data[f'R_{idx}'])
-                self.T_vectors.append(calib_data[f'T_{idx}'])
-            
-            # Compute projection matrices
-            self._compute_projection_matrices()
-            
-            print(f" Loaded calibration for {self.num_cameras} cameras")
-            
-        except Exception as e:
-            print(f" Error loading calibration: {e}")
-            raise
-    
     def _compute_projection_matrices(self):
         """Compute projection matrices for triangulation."""
+        self.projection_matrices = []
         for idx in range(self.num_cameras):
             # Create [R|T] matrix
             RT = np.hstack([self.R_matrices[idx], self.T_vectors[idx]])

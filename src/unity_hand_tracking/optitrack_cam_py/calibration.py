@@ -425,7 +425,7 @@ def save_calibration(
 # ---------------------------------------------------------------------------
 # Main capture + calibrate loop
 # ---------------------------------------------------------------------------
-def main():
+def _capture_main():
     # --- Camera setup via CameraManager ---
     mgr = CameraManager()
     if mgr.num_cameras == 0:
@@ -638,6 +638,11 @@ def main():
             print(f"\n⚠ Not enough captures ({num_captured}). Need at least 10.")
 
         mgr.stop_all()
+
+
+def main():
+    from handtrack.applications._calibration_runtime import main as run_calibration
+    return run_calibration("optitrack")
 
 
 if __name__ == "__main__":

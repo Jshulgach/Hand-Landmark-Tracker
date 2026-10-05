@@ -17,6 +17,7 @@ class ProcessingThread(threading.Thread):
         self._paused.set()
         self._lock = threading.Lock()
         self._latest_result = None
+        self.error = None
         self._proc_fps = 0.0
         self._t_prev = time.perf_counter()
 
@@ -35,6 +36,9 @@ class ProcessingThread(threading.Thread):
                 self._t_prev = now
                 time.sleep(0.001)
             except Exception as exc:
+                with self._lock:
+                    self._latest_result = None
+                    self.error = str(exc)
                 print(f"[ProcessingThread] Error: {exc}")
                 self._running = False
                 break
@@ -58,3 +62,5 @@ class ProcessingThread(threading.Thread):
         self._running = False
         self._paused.set()
         self.join(timeout=5)
+        if self.is_alive():
+            raise RuntimeError("Processing thread did not stop; resources are still in use")

@@ -1,23 +1,23 @@
 # Troubleshooting
 
-## `handtracker gui` Opens but No Camera Feed Appears
+## `mavis-track demo` Opens but No Camera Feed Appears
 
 Run:
 
 ```bash
-handtracker doctor
-handtracker cameras
+mavis-track doctor --backend webcam
+mavis-track cameras --backend webcam
 ```
 
 If OptiTrack is selected automatically, also run:
 
 ```bash
-handtracker inspect-calibration --backend optitrack
+mavis-track inspect-calibration --backend optitrack
 ```
 
 ## MediaPipe Import Errors
 
-HandTrack currently depends on the classic `mediapipe.solutions` API. Use the pinned package version from `pyproject.toml`.
+MAVIS currently depends on the classic `mediapipe.solutions` API. Use the pinned package version from `pyproject.toml`.
 
 ## OptiTrack SDK Not Found
 
@@ -28,15 +28,22 @@ Set `OPTITRACK_CAM_PY_PATH` or place the compiled SDK module in the expected bac
 Use:
 
 ```bash
-handtracker calibrate --backend webcam
-handtracker calibrate --backend optitrack
+mavis-track calibrate --backend webcam
+mavis-track calibrate --backend optitrack
 ```
 
 Then verify the output with:
 
 ```bash
-handtracker inspect-calibration --backend webcam
+mavis-track inspect-calibration --backend webcam
 ```
+
+## LSL local discovery
+
+If local LSL discovery fails, consult the [official LSL configuration guide](https://labstreaminglayer.readthedocs.io/info/lslapicfg.html).
+The release probe used a process-local configuration with machine scope and
+`KnownPeers = {127.0.0.1}`. That check does not validate another computer's firewall
+or an external recorder. Do not change global network settings just to run a demo.
 
 ## CLI Is Not Found
 

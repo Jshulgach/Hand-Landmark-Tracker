@@ -10,14 +10,14 @@ from typing import Sequence
 _BACKEND_ENTRYPOINTS = {
     "optitrack": {
         "gui": "unity_hand_tracking.optitrack_cam_py.mocap_handtrack_gui",
-        "calibrate": "unity_hand_tracking.optitrack_cam_py.calibration",
+        "calibrate": "handtrack.applications.optitrack_calibration",
         "cameras": "unity_hand_tracking.optitrack_cam_py.multi_mjpeg",
         "board": "unity_hand_tracking.optitrack_cam_py.generate_charuco_board",
         "test-sender": "unity_hand_tracking.optitrack_cam_py.test_sender",
     },
     "webcam": {
         "gui": "unity_hand_tracking.webcam.mocap_handracker_gui",
-        "calibrate": "unity_hand_tracking.webcam.calibration",
+        "calibrate": "handtrack.applications.webcam_calibration",
         "cameras": "unity_hand_tracking.webcam.multi_webcam",
         "board": "unity_hand_tracking.webcam.generate_charuco_board",
         "test-sender": "unity_hand_tracking.webcam.test_sender",
@@ -139,6 +139,8 @@ def _run_replay(args: argparse.Namespace) -> int:
         argv.extend(["--fps", str(args.fps)])
     if args.loop:
         argv.append("--loop")
+    if args.no_display:
+        argv.append("--no-display")
     return int(replay_main(argv))
 
 
@@ -167,13 +169,19 @@ def _add_backend_argument(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="handtracker",
-        description="Launch HandTrack applications without remembering nested module paths.",
+        prog="mavis-track",
+        description="MAVIS: Motion Analysis and Visual Interaction Suite.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     gui_parser = subparsers.add_parser("gui", help="launch the live hand-tracking GUI")
     _add_backend_argument(gui_parser)
+    gui_parser.add_argument("--advanced-hands", action="store_true", help="use calibrated multi-camera tracking")
+    gui_parser.add_argument("--source", default="0", help="camera index or video path")
+    gui_parser.add_argument("--mode", choices=("hands", "face", "pose", "holistic"), default="hands")
+    demo_parser = subparsers.add_parser("demo", help="start tracking with one camera, without calibration")
+    demo_parser.add_argument("--source", default="0")
+    demo_parser.add_argument("--mode", choices=("hands", "face", "pose", "holistic"), default="hands")
 
     calibrate_parser = subparsers.add_parser(
         "calibrate",
@@ -279,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument(
         "--confidence",
         type=float,
-        default=0.8,
+        default=0.5,
         help="minimum MediaPipe detection confidence",
     )
     record_parser.add_argument(
@@ -325,6 +333,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="loop playback until Escape is pressed",
     )
 
+    replay_parser.add_argument("--no-display", action="store_true", help="validate and render without opening a window")
+
     export_parser = subparsers.add_parser(
         "export",
         help="export a recorded session bundle into flat CSV files",
@@ -355,6 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="check runtime dependencies and backend availability",
     )
     _add_backend_argument(doctor_parser)
+    doctor_parser.add_argument("--gui", action="store_true")
 
     return parser
 
@@ -367,9 +378,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     if hasattr(args, "backend"):
         selected_backend = _resolve_backend(args.backend)
     if getattr(args, "backend", None) == "auto":
-        print(f"[handtracker] Selected backend: {selected_backend}")
+        print(f"[mavis-track] Selected backend: {selected_backend}")
+
+    if args.command == "demo" or (args.command == "gui" and not args.advanced_hands and selected_backend == "webcam"):
+        try:
+            from .mediapipe_gui import main as demo_main
+        except ImportError as exc:
+            parser.error(f"Install the desktop extra: pip install 'mavis-track[gui]' ({exc})")
+        return int(demo_main(["--source", args.source, "--mode", args.mode]))
 
     if args.command == "doctor":
+        if args.gui:
+            from ._doctor import main as doctor_main
+            return int(doctor_main(["--backend", selected_backend, "--gui"]))
         return _run_doctor(selected_backend)
 
     if args.command == "inspect-calibration":

@@ -1,64 +1,26 @@
 name: Build example downloads
-
 on:
   workflow_dispatch:
   release:
-    types:
-      - published
-
+    types: [published]
 permissions:
   contents: write
-
 jobs:
   package-examples:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Assemble curated bundles
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p staging/handtrack-core-examples/examples
-          mkdir -p staging/handtrack-research-examples/examples
-
-          cp LICENSE staging/handtrack-core-examples/
-          cp examples/DOWNLOADS.md staging/handtrack-core-examples/README.md
-          cp -R examples/01_basic_tracking staging/handtrack-core-examples/examples/
-          cp -R examples/02_data_extraction staging/handtrack-core-examples/examples/
-          cp -R examples/03_streaming staging/handtrack-core-examples/examples/
-          cp -R examples/04_advanced_applications staging/handtrack-core-examples/examples/
-
-          cp LICENSE staging/handtrack-research-examples/
-          cp examples/RESEARCH_DOWNLOAD.md staging/handtrack-research-examples/README.md
-          cp -R examples/Joint_Kinematics_from_EMG staging/handtrack-research-examples/examples/
-          cp -R examples/Joint_Kinematics_from_EMG_OpenEphys staging/handtrack-research-examples/examples/
-          cp -R examples/Smoothing_Motion_with_RNN staging/handtrack-research-examples/examples/
-
-          find staging -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
-          find staging -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.pyd' -o -name '*.exe' -o -name '*.npz' -o -name '*.csv' -o -name '*.mp4' \) -delete
-
-          cd staging
-          zip -qr ../handtrack-core-examples.zip handtrack-core-examples
-          zip -qr ../handtrack-research-examples.zip handtrack-research-examples
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          name: handtrack-example-downloads
-          path: |
-            handtrack-core-examples.zip
-            handtrack-research-examples.zip
-
+          python-version: '3.11'
+      - run: python scripts/package_examples.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mavis-example-downloads
+          path: dist/mavis-*-examples.zip
       - name: Attach bundles to GitHub release
         if: github.event_name == 'release'
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          gh release upload "$RELEASE_TAG" \
-            handtrack-core-examples.zip \
-            handtrack-research-examples.zip \
-            --clobber
+        run: gh release upload "$RELEASE_TAG" dist/mavis-*-examples.zip --clobber

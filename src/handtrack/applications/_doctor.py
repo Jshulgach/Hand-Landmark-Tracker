@@ -32,7 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--backend",
         choices=("auto", "optitrack", "webcam"),
-        default="auto",
+        default="webcam",
         help="backend to validate; auto includes OptiTrack checks when available",
     )
     parser.add_argument(
@@ -40,6 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="deprecated alias for --backend optitrack",
     )
+    parser.add_argument("--gui", action="store_true", help="also require the desktop GUI runtime")
     args = parser.parse_args(argv)
 
     check_optitrack = args.optitrack or args.backend in ("auto", "optitrack")
@@ -50,6 +51,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "mediapipe",
         "scipy",
     ]
+    if args.gui:
+        required_modules.extend(["PyQt5.QtWidgets", "handtrack.applications.mediapipe_gui"])
     optional_modules = [
         "pylsl",
         "PyQt5",

@@ -24,23 +24,29 @@ def angle_between_points(a, b, c, degrees=True):
     return np.degrees(angle) if degrees else angle
 
 
+ANGLE_TRIPLES = {"thumb_cmc_mcp": (0, 2, 3), "thumb_ip": (2, 3, 4)}
+for _finger, _base in (("index", 5), ("middle", 9), ("ring", 13), ("pinky", 17)):
+    ANGLE_TRIPLES[f"{_finger}_mcp"] = (0, _base, _base + 1)
+    ANGLE_TRIPLES[f"{_finger}_pip"] = (_base, _base + 1, _base + 2)
+    ANGLE_TRIPLES[f"{_finger}_dip"] = (_base + 1, _base + 2, _base + 3)
+
+
 def compute_all_joint_angles(landmarks):
-    """
-    Computes angles at each landmark by treating each point as the center of a local triangle (i-1, i, i+1).
+    """Geometric flexion estimates in degrees, zero for a straight joint.
 
-    Args:
-        landmarks (np.ndarray): Array of shape (21, 3)
-
-    Returns:
-        dict: Map of index -> angle (in degrees) for valid joints.
+    Coordinates must share one Cartesian scale. Missing or coincident points
+    produce NaN; these estimates are not validated clinical measurements.
     """
+    points = np.asarray(landmarks, dtype=np.float64)
+    if points.shape != (21, 3):
+        raise ValueError("landmarks must have shape (21, 3)")
     angles = {}
-    for i in range(1, len(landmarks)-1):
-        try:
-            angle = angle_between_points(landmarks[i - 1], landmarks[i], landmarks[i + 1])
-            angles[i] = angle
-        except:
-            continue
+    for name, (a, b, c) in ANGLE_TRIPLES.items():
+        triple = points[[a, b, c]]
+        valid = (np.isfinite(triple).all()
+                 and np.linalg.norm(points[a] - points[b]) > 1e-12
+                 and np.linalg.norm(points[c] - points[b]) > 1e-12)
+        angles[name] = float(180 - angle_between_points(*triple)) if valid else float("nan")
     return angles
 
 

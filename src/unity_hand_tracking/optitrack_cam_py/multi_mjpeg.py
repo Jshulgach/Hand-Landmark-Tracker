@@ -24,6 +24,8 @@ Usage from another script:
 import threading
 import time
 
+from mavis_track._capture import FrameBuffer, snapshots
+
 import cv2
 import numpy as np
 
@@ -48,7 +50,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Per-camera threaded worker
 # ---------------------------------------------------------------------------
-class CameraWorker(threading.Thread):
+class CameraWorker(FrameBuffer, threading.Thread):
     """
     Dedicated thread that continuously drains a single camera's buffer
     so the most recent frame is always available via get_frame().
@@ -67,15 +69,12 @@ class CameraWorker(threading.Thread):
         self.lock = threading.Lock()
         self.width = camera.width()
         self.height = camera.height()
+        self.frame_timestamp = None
+        self.status = "starting"
+        self.error = ""
+        self.ready = threading.Event()
 
     # -- public helpers (safe to call from any thread) ----------------------
-
-    def get_frame(self):
-        """Return the latest BGR frame (copy), or a black placeholder."""
-        with self.lock:
-            if self.latest_frame is not None:
-                return self.latest_frame.copy()
-        return np.zeros((self.height, self.width, 3), np.uint8)
 
     def get_resolution(self):
         return self.width, self.height
@@ -87,12 +86,25 @@ class CameraWorker(threading.Thread):
 
     def stop(self):
         self.running = False
-        self.camera.stop()
-        self.camera.release()
+        # The capture thread owns SDK handles and releases them in its finally block.
 
     # -- thread body --------------------------------------------------------
 
     def run(self):
+        try:
+            self._capture()
+        except Exception as exc:
+            self.error = str(exc)
+            self.status = "failed"
+        finally:
+            self.running = False
+            self.ready.set()
+            try:
+                self.camera.stop()
+            finally:
+                self.camera.release()
+
+    def _capture(self):
         cam = self.camera
         cam.set_video_type(self.mjpeg_mode)
         cam.set_exposure(self.exposure)
@@ -112,11 +124,12 @@ class CameraWorker(threading.Thread):
         while self.running:
             frame_obj = cam.get_latest_frame()
             if frame_obj:
-                img_rgba = frame_obj.rasterize(self.width, self.height)
-                img_bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
-                with self.lock:
-                    self.latest_frame = img_bgr
-                frame_obj.release()
+                try:
+                    img_rgba = frame_obj.rasterize(self.width, self.height)
+                    img_bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
+                    self.publish_frame(img_bgr)
+                finally:
+                    frame_obj.release()
             # Always yield CPU — prevents starving other processes.
             # ~2ms sleep still allows >200 FPS capture which far exceeds
             # the ~30 FPS processing rate.
@@ -149,6 +162,8 @@ class CameraManager:
         print(f"Detected {self.num_cameras} cameras.")
 
         self.workers: list[CameraWorker] = []
+        self._shutdown = False
+        self.camera_indices = list(range(self.num_cameras))
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -203,14 +218,26 @@ class CameraManager:
 
         return self.workers
 
+    def wait_ready(self, timeout=3):
+        for worker in self.workers:
+            if not worker.ready.wait(timeout) or worker.frame_timestamp is None:
+                raise RuntimeError(f"{worker.name} did not supply a frame: {worker.error}")
+
     def stop_all(self):
         """Stop every worker and shut down the SDK."""
+        if self._shutdown:
+            return
         print("Shutting down workers...")
         for w in self.workers:
             w.stop()
         for w in self.workers:
             w.join(timeout=3)
+        alive = [worker.name for worker in self.workers if worker.is_alive()]
+        if alive:
+            raise RuntimeError(f"Camera workers did not stop: {alive}")
         optitrack_cam.shutdown_sdk()
+        self._shutdown = True
+        self.workers.clear()
         print("Cleanup complete.")
 
     # -- frame access -------------------------------------------------------
@@ -224,9 +251,18 @@ class CameraManager:
         """Return the latest BGR frame from a specific camera."""
         return self.workers[cam_index].get_frame()
 
-    def get_all_frames(self):
+    def get_all_frames(self, copy=True):
         """Return a list of BGR frames, one per camera (in index order)."""
-        return [w.get_frame() for w in self.workers]
+        frames = []
+        for worker in self.workers:
+            frame, _ = worker.get_snapshot()
+            if frame is None:
+                frame = np.zeros((worker.height, worker.width, 3), np.uint8)
+            frames.append(frame.copy() if copy else frame)
+        return frames
+
+    def get_fresh_frames(self):
+        return snapshots(self.workers)
 
     def get_grid(
         self,
@@ -254,6 +290,9 @@ class CameraManager:
         if not frames:
             return np.zeros((480, 640, 3), np.uint8)
 
+        width = max(frame.shape[1] for frame in frames)
+        height = max(frame.shape[0] for frame in frames)
+        frames = [cv2.resize(frame, (width, height)) for frame in frames]
         if overlay_labels:
             for i, f in enumerate(frames):
                 cv2.putText(

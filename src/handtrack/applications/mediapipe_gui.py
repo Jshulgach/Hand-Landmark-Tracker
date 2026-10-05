@@ -43,7 +43,7 @@ class MediaPipeTrackerGUI(QMainWindow):
         self.frames = 0
         self.fps_started = time.perf_counter()
 
-        self.setWindowTitle("HandTrack · MediaPipe Studio")
+        self.setWindowTitle("MAVIS · Tracking Studio")
         self.resize(980, 720)
         self._build_ui()
 
@@ -88,6 +88,8 @@ class MediaPipeTrackerGUI(QMainWindow):
         if self.capture is None:
             self.capture = cv2.VideoCapture(self.source)
         if not self.capture.isOpened():
+            self._stop()
+            self.preview.clear()
             self.preview.setText(f"Unable to open camera source {self.source!r}")
             self.status.setText("Camera unavailable")
             return
@@ -112,7 +114,11 @@ class MediaPipeTrackerGUI(QMainWindow):
 
     def _change_mode(self, label: str) -> None:
         mode = _MODE_LABELS[label]
-        self.tracker.set_mode(mode)
+        try:
+            self.tracker.set_mode(mode)
+        except Exception as exc:
+            self.status.setText(f"Mode unavailable: {exc}")
+            return
         self.frames = 0
         self.fps_started = time.perf_counter()
         self.status.setText(f"Mode: {label}")
@@ -121,13 +127,22 @@ class MediaPipeTrackerGUI(QMainWindow):
         if self.capture is None:
             return
         ok, frame = self.capture.read()
-        if not ok:
-            self.status.setText("Frame read failed")
+        if not ok or frame is None:
+            self._stop()
+            self.preview.clear()
+            self.preview.setText("Source ended or camera disconnected. Start to retry.")
+            self.status.setText("No frames")
             return
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result = self.tracker.process(rgb)
-        self.tracker.draw(frame, result)
+        try:
+            result = self.tracker.process(rgb)
+            self.tracker.draw(frame, result)
+        except Exception as exc:
+            self._stop()
+            self.preview.clear()
+            self.preview.setText(f"Tracking stopped: {exc}")
+            return
 
         self.frames += 1
         elapsed = max(time.perf_counter() - self.fps_started, 1e-6)
