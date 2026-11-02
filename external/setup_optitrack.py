@@ -110,9 +110,10 @@ def main(argv=None):
     except (OSError, RuntimeError) as exc:
         print(f'OptiTrack setup failed: {exc}', file=sys.stderr)
         return 1
-    print(f'Verified Python 3.11 x64 runtime: {target}')
+    print(f'Verified local Python 3.11 x64 runtime files: {target}')
     print('Vendor files remain local and ignored by Git; no headers or build libraries were restored.')
-    print('System SDK / USB driver status: not checked or changed by this utility.')
+    print('Prerequisite on a new PC: complete the official OptiTrack Camera SDK installer USB driver step.')
+    print('USB driver status: not checked or changed by this utility; see external/README.md for driver-only setup.')
     print('If USB drivers are already installed, test camera detection before changing them.')
     print('Local runtime: legacy Camera SDK 1.10.x DLL paired with this Python binding.')
     print('MAVIS source checkouts discover this runtime automatically after restarting the application.')

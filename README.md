@@ -115,11 +115,15 @@ validated camera matrices. Files live in a user data directory, with existing
 `HANDTRACK_OPTITRACK_CALIBRATION_DIR` overrides supported. Source indices can
 change when cameras are replugged: verify physical order or recalibrate.
 
-OptiTrack remains an optional Windows SDK integration. The author has historical
-Windows hardware tests; current release work has no OptiTrack hardware retest.
-Install the official SDK/USB drivers separately. The tracked
-[external setup guide](external/README.md) provides verified local runtime recovery
-for Python 3.11 x64; source installations discover that runtime automatically.
+OptiTrack remains an optional Windows SDK integration. On 2 November 2026, the
+operator reported that completing the USB driver installation resolved
+zero-camera discovery on a new PC.
+**Complete the official Camera SDK installer's USB driver step on each new PC.**
+The operator confirmed that the remaining SDK installation could then be
+cancelled after driver completion. Python installation/runtime recovery does not
+install USB drivers. See the tracked [external setup guide](external/README.md)
+for the driver-only workflow and verified local runtime recovery for Python 3.11
+x64; source installations discover that runtime automatically.
 Use `OPTITRACK_CAM_PY_PATH` for another compatible binding.
 
 ## Development and release

@@ -10,13 +10,25 @@ The known historical runtime uses Camera SDK 1.10.x (DLL ProductVersion
 1.10.3.5) and **64-bit CPython 3.11 on Windows x64**. MAVIS itself supports
 other Python versions, but this particular prebuilt binding does not.
 
-1. Ensure the official OptiTrack USB drivers are installed. If an SDK/driver
-   installation is already present, test camera detection before changing it.
-   Camera SDK **1.10.3** was used successfully with this project's Flex 13 FS
-   setup; compatibility with another driver version still needs a hardware test.
-   The setup utility does not inspect installed drivers, and its reminder is not
-   a diagnosis that they are missing. Review the vendor license when installing.
-   Official installers: [OptiTrack developer downloads](https://optitrack.com/support/downloads/developer-tools.html).
+1. **Complete the OptiTrack USB driver installation on each new Windows PC.**
+   Download and launch the official [Camera SDK installer](https://optitrack.com/support/downloads/developer-tools.html),
+   select its USB driver component, and allow the driver installer to finish.
+   Installing Python packages or restoring the local runtime does not install
+   these Windows drivers. Other motion-capture software being installed does
+   not establish that the OptiTrack drivers are present.
+
+   **Driver-only workflow:** the operator confirmed on the new PC that completing
+   the USB driver installer, then cancelling the remaining Camera SDK installation,
+   resolved zero-camera detection. Finish the driver step before cancelling the
+   parent installer. If the installer offers a driver-only/custom component
+   option, use that; the available workflow depends on the installer version.
+   Additional SDK development tools are not required by the prebuilt-runtime
+   workflow below. Review the vendor license during installation.
+
+   Confirm Windows recognizes the hub and cameras without driver warnings, then
+   test camera detection in MAVIS. The historical Flex 13 FS setup previously
+   worked with Camera SDK **1.10.3**; the exact installer version used on the new
+   PC was not recorded, so this is not a claim that every driver version works.
 2. Use a Python 3.11 x64 environment and a full Git clone of this project.
    From its root, install the current source and restore the local runtime:
 
@@ -89,3 +101,11 @@ installing a newer system SDK does not switch that binding to the newer library.
 Using a newer SDK runtime requires a compatible binding and separate validation;
 do not replace the recovered DLL with an arbitrary newer version. An SDK import
 check and a camera enumeration test verify different parts of the setup.
+
+## Confirmed new-PC setup issue
+
+On 2 November 2026, the operator reported `optitrack:sdk : ok` while the GUI
+detected zero connected cameras. Completing the USB driver stage of the official
+OptiTrack installer resolved discovery; the remaining SDK installation was
+cancelled afterward. This confirms that a successful Python/native-library
+import is not a USB driver or camera-detection check.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Document the required OptiTrack USB driver step for a new Windows computer,
+  including the operator-verified driver-only installer workflow, and distinguish
+  successful runtime imports from actual camera discovery.
+
 - Track the external setup guide, activation scripts and checksum-verified
   OptiTrack runtime recovery utility; keep vendor files local. Discover the
   checkout runtime automatically and expose original native import errors.

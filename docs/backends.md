@@ -59,8 +59,11 @@ Windows Camera SDK. Source installations discover the local
 `external/optitrack-sdk-1.10/runtime` directory automatically. Set
 `OPTITRACK_CAM_PY_PATH` to use another compatible binding folder. See the
 [new-computer installation steps](installation.md#optitrack-on-a-new-windows-computer).
-The author reports historical successful Windows hardware tests. No current
-OptiTrack hardware retest was possible during this release work.
+On 2 November 2026, the operator reported that completing the USB driver stage
+of the official installer resolved zero-camera discovery on a new PC. The
+remaining SDK installation was cancelled after the driver step completed; see
+the installation guide for this driver-only workflow. This operator report is
+separate from the automated software/import checks.
 
 SDK binaries and headers are excluded from wheel, source distribution, and curated
 example downloads. Existing repository history contains earlier development

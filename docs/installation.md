@@ -86,12 +86,22 @@ Research datasets and trained weights are stored outside the checkout. See the
 
 ## OptiTrack on a new Windows computer
 
-For the historical Flex 13 FS setup, ensure the OptiTrack USB drivers are
-installed, use **Python 3.11 x64**, and install the current checkout rather than
-relying on the older published package. Camera SDK 1.10.3 was used successfully
-with this setup. If drivers from another SDK are already installed, test camera
-detection before changing them; the setup utility does not inspect driver status. The SDK installer does not supply this
-project's Python binding. From a full Git clone with that environment active:
+**First complete the OptiTrack USB driver installation on the new PC.** Launch
+OptiTrack's official Camera SDK installer, select the USB driver component and
+let that driver installation finish. Python package installation and the local
+runtime recovery command do not install Windows USB drivers.
+
+For a driver-only setup, the operator verified that completing the USB driver
+installer and then cancelling the remaining Camera SDK installation fixed
+zero-camera detection on the new PC. Do not cancel the driver stage itself.
+Use a driver-only/custom component option when offered; installer layouts vary.
+The full SDK development tools are optional for the restored-runtime workflow.
+
+Use **Python 3.11 x64** and install the current checkout rather than relying on
+the older published package. Camera SDK 1.10.3 was used successfully with the
+historical Flex 13 FS setup; the new PC's installer version was not recorded.
+The SDK installer does not supply this project's Python binding. From a full
+Git clone with that environment active:
 
 ```bat
 python -m pip install -e ".[gui,optitrack]"
@@ -108,3 +118,8 @@ review still use the official installer. Source ZIPs and shallow clones need a
 full clone or a copied matching runtime. See the
 [external setup guide](https://github.com/Jshulgach/Hand-Landmark-Tracker/tree/main/external)
 for recovery, copy and environment-variable commands.
+
+A successful `optitrack:sdk : ok` verifies that the binding loads, not that USB
+drivers are installed or the cameras are detected. After setup, start the GUI
+and verify the expected camera count. An unset SDK environment variable is
+normal when the checkout runtime is found automatically.
