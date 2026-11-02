@@ -84,7 +84,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if check_optitrack:
         sdk_env = os.environ.get("OPTITRACK_CAM_PY_PATH", "")
-        rows.append(("env:OPTITRACK_CAM_PY_PATH", sdk_env or "<not-set>"))
+        rows.append(("env:OPTITRACK_CAM_PY_PATH", sdk_env or "<not-set> (optional; automatic search)"))
         passed, detail = _check_import("unity_hand_tracking.optitrack_cam_py.config")
         rows.append(("optitrack:config", detail))
 
@@ -93,6 +93,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             sdk_available = getattr(cfg, "optitrack_cam", None) is not None
             rows.append(("optitrack:sdk", "ok" if sdk_available else "missing"))
             ok = ok and sdk_available
+            if sdk_available:
+                binding_path = getattr(cfg.optitrack_cam, "__file__", None)
+                if binding_path:
+                    rows.append(("optitrack:binding", str(binding_path)))
             if not sdk_available:
                 rows.append(("optitrack:import-error", getattr(cfg, "SDK_IMPORT_ERROR", "unknown")))
                 rows.append(

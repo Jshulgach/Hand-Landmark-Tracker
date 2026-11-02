@@ -125,3 +125,24 @@ def test_camera_start_reports_native_error_before_sdk_initialization(monkeypatch
     monkeypatch.setattr(multi_mjpeg, "SDK_IMPORT_ERROR", "ImportError: missing dependent DLL")
     with pytest.raises(RuntimeError, match="missing dependent DLL.*external/setup_optitrack.py"):
         multi_mjpeg.CameraManager()
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_doctor_distinguishes_optional_environment_from_sdk_failure(monkeypatch, capsys, available):
+    from handtrack.applications import _doctor
+    binding = SimpleNamespace(__file__="C:/MAVIS/external/runtime/optitrack_cam.pyd")
+    config = SimpleNamespace(optitrack_cam=binding if available else None,
+                             SDK_IMPORT_ERROR="ImportError: required DLL is missing")
+    monkeypatch.delenv("OPTITRACK_CAM_PY_PATH", raising=False)
+    monkeypatch.setattr(_doctor, "_check_import", lambda _: (True, "ok"))
+    monkeypatch.setattr(_doctor.importlib, "import_module", lambda _: config)
+    assert _doctor.main(["--backend", "optitrack"]) == (0 if available else 1)
+    output = capsys.readouterr().out
+    assert "<not-set> (optional; automatic search)" in output
+    if available:
+        assert "optitrack:binding" in output and binding.__file__ in output
+        assert "optitrack:import-error" not in output
+    else:
+        assert "optitrack:import-error" in output
+        assert config.SDK_IMPORT_ERROR in output
+        assert "optitrack:binding" not in output

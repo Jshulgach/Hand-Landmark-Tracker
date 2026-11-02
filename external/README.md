@@ -73,3 +73,9 @@ are distinct setup issues. The official SDK installation does not create our
 `optitrack_cam` Python binding. Likewise, a successful import does not prove USB
 drivers are installed or cameras are connected. Confirm `optitrack:sdk : ok`,
 then start preview. Calibration is only needed to enable 3D reconstruction.
+
+An unset `OPTITRACK_CAM_PY_PATH` is normal with automatic discovery. In `doctor`,
+check `optitrack:sdk : ok` and the `optitrack:binding` path. The environment row
+is informational. If `optitrack:sdk` is missing, use `optitrack:import-error` to
+identify the actual load failure. The activation helpers above set the optional
+variable for the current terminal when explicit configuration is desired.
