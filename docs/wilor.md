@@ -100,6 +100,39 @@ working environment to resolve these. The WiLoR doctor reports assets, package
 versions and CUDA/GPU details without loading checkpoints or opening cameras;
 an `ok` dependency check is not proof that inference works.
 
+## RTX 3060 target computer
+
+The target computer has an NVIDIA RTX 3060 (operator reported 2 November 2026).
+NVIDIA lists it as [CUDA compute capability 8.6](https://developer.nvidia.com/cuda/gpus).
+This supports testing a CUDA runtime; throughput and memory use still require
+measurement. The development laptop's Intel GPU is a separate machine.
+
+On the RTX 3060 computer, collect the actual VRAM and driver version:
+
+```powershell
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+```
+
+Do not assume a particular amount of VRAM from the RTX 3060 name alone.
+A candidate close to upstream's tested Torch 2.0 family is Torch 2.0.1 with
+torchvision 0.15.2 and CUDA 11.8 wheels, a combination provided in
+[PyTorch's previous-version instructions](https://pytorch.org/get-started/previous-versions/#v201).
+This is a proposed compatibility test profile, not a validated WiLoR environment
+or complete dependency lock. Do not mix its packages into the working environment.
+
+The next manual asset step is to register on the
+[MANO website](https://mano.is.tue.mpg.de/), agree to its license, download the
+MANO models archive and extract `MANO_RIGHT.pkl`. Put that file at:
+
+```text
+<Hand-Landmark-Tracker>/external/WiLoR/mano_data/MANO_RIGHT.pkl
+```
+
+The inference adapter uses this right-hand MANO model for both hands, reflecting
+left-hand predictions back to the input image. A separate MANO_LEFT.pkl is not
+required by this adapter. Registration/license acceptance and this download must
+be completed by the model user; MAVIS does not obtain the asset on their behalf.
+
 ## Live preview
 
 Once the runtime and assets are available:
