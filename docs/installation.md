@@ -86,9 +86,11 @@ Research datasets and trained weights are stored outside the checkout. See the
 
 ## OptiTrack on a new Windows computer
 
-For the historical Flex 13 FS setup, install Camera SDK 1.10.3 with its USB
-drivers, use **Python 3.11 x64**, and install the current checkout rather than
-relying on the older published package. The SDK installer does not supply this
+For the historical Flex 13 FS setup, ensure the OptiTrack USB drivers are
+installed, use **Python 3.11 x64**, and install the current checkout rather than
+relying on the older published package. Camera SDK 1.10.3 was used successfully
+with this setup. If drivers from another SDK are already installed, test camera
+detection before changing them; the setup utility does not inspect driver status. The SDK installer does not supply this
 project's Python binding. From a full Git clone with that environment active:
 
 ```bat

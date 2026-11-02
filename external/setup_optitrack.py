@@ -112,7 +112,9 @@ def main(argv=None):
         return 1
     print(f'Verified Python 3.11 x64 runtime: {target}')
     print('Vendor files remain local and ignored by Git; no headers or build libraries were restored.')
-    print('Install the official Camera SDK 1.10.3 / USB drivers separately and review its license.')
+    print('System SDK / USB driver status: not checked or changed by this utility.')
+    print('If USB drivers are already installed, test camera detection before changing them.')
+    print('Local runtime: legacy Camera SDK 1.10.x DLL paired with this Python binding.')
     print('MAVIS source checkouts discover this runtime automatically after restarting the application.')
     print('Next: python -m mavis_track doctor --backend optitrack --gui')
     print('Then: python -m mavis_track gui --backend optitrack')

@@ -10,9 +10,13 @@ The known historical runtime uses Camera SDK 1.10.x (DLL ProductVersion
 1.10.3.5) and **64-bit CPython 3.11 on Windows x64**. MAVIS itself supports
 other Python versions, but this particular prebuilt binding does not.
 
-1. Install the official Camera SDK **1.10.3** and select its USB driver option
-   for the Flex 13 FS setup. Review the vendor license in the installer. Obtain
-   the installer from [OptiTrack developer downloads](https://optitrack.com/support/downloads/developer-tools.html).
+1. Ensure the official OptiTrack USB drivers are installed. If an SDK/driver
+   installation is already present, test camera detection before changing it.
+   Camera SDK **1.10.3** was used successfully with this project's Flex 13 FS
+   setup; compatibility with another driver version still needs a hardware test.
+   The setup utility does not inspect installed drivers, and its reminder is not
+   a diagnosis that they are missing. Review the vendor license when installing.
+   Official installers: [OptiTrack developer downloads](https://optitrack.com/support/downloads/developer-tools.html).
 2. Use a Python 3.11 x64 environment and a full Git clone of this project.
    From its root, install the current source and restore the local runtime:
 
@@ -79,3 +83,9 @@ check `optitrack:sdk : ok` and the `optitrack:binding` path. The environment row
 is informational. If `optitrack:sdk` is missing, use `optitrack:import-error` to
 identify the actual load failure. The activation helpers above set the optional
 variable for the current terminal when explicit configuration is desired.
+
+The recovered binding uses its matching local legacy CameraLibrary DLL. Merely
+installing a newer system SDK does not switch that binding to the newer library.
+Using a newer SDK runtime requires a compatible binding and separate validation;
+do not replace the recovered DLL with an arbitrary newer version. An SDK import
+check and a camera enumeration test verify different parts of the setup.
