@@ -108,7 +108,7 @@ def main(argv=None):
     pybind_dir=subprocess.check_output([sys.executable,'-m','pybind11','--cmakedir'],text=True).strip()
     build=output/'build'
     native=output/'runtime'
-    subprocess.run(['cmake','-S',str(source),'-B',str(build),'-A','x64',
+    subprocess.run(['cmake','-S',str(source),'-B',str(build),'-G','Visual Studio 17 2022','-A','x64',
         f'-DCAMERA_SDK_DIR={sdk}',f'-DCAMERA_BINDING_OUTPUT_DIR={native}',
         f'-DPython3_EXECUTABLE={sys.executable}',f'-Dpybind11_DIR={pybind_dir}'],check=True)
     subprocess.run(['cmake','--build',str(build),'--config','Release','--parallel','2'],check=True)
