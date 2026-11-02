@@ -63,5 +63,6 @@ calibration_data/
 /external/*
 !/external/README.md
 !/external/setup_optitrack.py
+!/external/build_optitrack.py
 !/external/Activate.cmd
 !/external/Activate.ps1

@@ -9,7 +9,7 @@ find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 
 # Camera SDK paths based on your current setup
-set(CAMERA_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Camera SDK")
+set(CAMERA_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Camera SDK" CACHE PATH "Camera SDK include/lib root")
 set(CAMERA_SDK_INCLUDE "${CAMERA_SDK_DIR}/include")
 set(CAMERA_SDK_LIB_DIR "${CAMERA_SDK_DIR}/lib")
 
@@ -34,20 +34,11 @@ target_compile_definitions(optitrack_cam PRIVATE WIN32 CAMERALIBRARY_IMPORTS COR
 # Link CameraLibrary and standard Windows dependencies
 target_link_libraries(optitrack_cam PRIVATE "${CAMERALIBRARY_LIB}" ws2_32.lib setupapi.lib)
 
-# Set output directory to parent folder
+# Only the project-owned Python binding is built; SDK DLLs remain separate.
+set(CAMERA_BINDING_OUTPUT_DIR "${CMAKE_BINARY_DIR}/runtime" CACHE PATH "Binding output")
 set_target_properties(optitrack_cam PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    LIBRARY_OUTPUT_DIRECTORY "${CAMERA_BINDING_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${CAMERA_BINDING_OUTPUT_DIR}"
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CAMERA_BINDING_OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CAMERA_BINDING_OUTPUT_DIR}"
 )
-
-# Deployment: Copy DLLs to output directory for runtime
-if(WIN32)
-    file(GLOB CAMERA_SDK_DLLS "${CAMERA_SDK_LIB_DIR}/*.dll")
-    foreach(dll_file ${CAMERA_SDK_DLLS})
-        add_custom_command(TARGET optitrack_cam POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${dll_file}"
-            "$<TARGET_FILE_DIR:optitrack_cam>/"
-        )
-    endforeach()
-endif()

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import platform
 import struct
 import subprocess
@@ -62,6 +63,23 @@ def historical_file(repo, name):
     return result.stdout
 
 
+def verified_local_binding(folder, name, data):
+    if name != 'optitrack_cam.cp311-win_amd64.pyd':
+        return False
+    manifest_path = Path(folder) / 'binding-build.json'
+    if not manifest_path.is_file():
+        return False
+    try:
+        record = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if not isinstance(record, dict):
+            return False
+        return (record.get('binding_api') == 2 and record.get('python_abi') == 'cp311-win_amd64'
+                and record.get('binding_sha256') == hashlib.sha256(data).hexdigest()
+                and record.get('sdk_dll_sha256') == RUNTIME_FILES['CameraLibrary2015x64S.dll']['sha256'])
+    except (ValueError, OSError, KeyError):
+        return False
+
+
 def restore_runtime(repo, source=None):
     repo = Path(repo).resolve()
     target = runtime_folder(repo)
@@ -74,6 +92,8 @@ def restore_runtime(repo, source=None):
         if output.is_symlink():
             raise RuntimeError(f'Refusing to replace a symlink: {output}')
         if output.exists() and output.read_bytes() != data:
+            if verified_local_binding(target, name, output.read_bytes()):
+                continue  # Preserve the user's locally built API v2 binding.
             raise RuntimeError(f'Refusing to overwrite a different local runtime: {output}')
         pending[name] = data
     target.mkdir(parents=True, exist_ok=True)
@@ -90,7 +110,9 @@ def restore_runtime(repo, source=None):
 def check_runtime(repo):
     target = runtime_folder(repo)
     for name in RUNTIME_FILES:
-        verify_data(name, (target / name).read_bytes())
+        data = (target / name).read_bytes()
+        if not verified_local_binding(target, name, data):
+            verify_data(name, data)
     return target
 
 

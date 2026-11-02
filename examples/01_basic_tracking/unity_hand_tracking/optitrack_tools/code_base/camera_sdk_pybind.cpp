@@ -7,7 +7,8 @@ namespace py = pybind11;
 using namespace CameraLibrary;
 
 PYBIND11_MODULE(optitrack_cam, m) {
-    m.doc() = "Python bindings for OptiTrack Camera Library SDK with Latency Fix";
+    m.doc() = "MAVIS OptiTrack Camera Library bindings";
+    m.attr("BINDING_API_VERSION") = 2;
 
     // Initialize SDK & Global Manager 
     m.def("initialize_sdk", []() {
@@ -30,6 +31,26 @@ PYBIND11_MODULE(optitrack_cam, m) {
         .def("set_agc", &Camera::SetAGC)
         .def("set_exposure", &Camera::SetExposure)
         .def("get_exposure", &Camera::Exposure)
+        .def("get_intensity", &Camera::Intensity)
+        .def("min_intensity", &Camera::MinimumIntensity)
+        .def("max_intensity", &Camera::MaximumIntensity)
+        .def("set_intensity", [](Camera &c, int value) {
+            if (value < c.MinimumIntensity() || value > c.MaximumIntensity())
+                throw py::value_error("IR intensity is outside the camera's reported limits");
+            c.SetIntensity(value);
+            return c.Intensity();
+        })
+        .def("is_high_power_supported", &Camera::IsHighPowerModeSupported)
+        .def("is_high_power_available", &Camera::IsHighPowerModeAvailable)
+        .def("get_high_power", &Camera::HighPowerMode)
+        .def("set_high_power", [](Camera &c, bool enabled) {
+            if (!c.IsHighPowerModeSupported())
+                throw py::value_error("High power is not adjustable on this camera");
+            if (enabled && !c.IsHighPowerModeAvailable())
+                throw py::value_error("High power is unavailable with the current camera/hub connection");
+            c.SetHighPowerMode(enabled);
+            return c.HighPowerMode();
+        })
         .def("set_text_overlay", &Camera::SetTextOverlay)
         .def("release", &Camera::Release)
         // Standard GetFrame

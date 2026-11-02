@@ -146,3 +146,38 @@ def test_doctor_distinguishes_optional_environment_from_sdk_failure(monkeypatch,
         assert "optitrack:import-error" in output
         assert config.SDK_IMPORT_ERROR in output
         assert "optitrack:binding" not in output
+
+
+def test_history_recovery_preserves_identified_local_binding_build(monkeypatch, tmp_path):
+    import json
+    binding='optitrack_cam.cp311-win_amd64.pyd'
+    dll='CameraLibrary2015x64S.dll'
+    payload={binding:b'original binding',dll:b'original DLL'}
+    monkeypatch.setattr(setup,'RUNTIME_FILES',{
+        name:{'sha256':hashlib.sha256(data).hexdigest(),'source':name}
+        for name,data in payload.items()
+    })
+    source=tmp_path/'source'
+    source.mkdir()
+    for name,data in payload.items():
+        (source/name).write_bytes(data)
+    repo=tmp_path/'checkout'
+    target=setup.restore_runtime(repo,source)
+    upgraded=b'new locally compiled binding'
+    (target/binding).write_bytes(upgraded)
+    manifest={'binding_api':2,'python_abi':'cp311-win_amd64',
+              'binding_sha256':hashlib.sha256(upgraded).hexdigest(),
+              'sdk_dll_sha256':hashlib.sha256(payload[dll]).hexdigest()}
+    (target/'binding-build.json').write_text(json.dumps(manifest))
+    assert setup.restore_runtime(repo,source)==target
+    assert (target/binding).read_bytes()==upgraded
+    assert setup.check_runtime(repo)==target
+    (target/dll).write_bytes(b'wrong vendor DLL')
+    with pytest.raises(RuntimeError,match='Checksum mismatch'):
+        setup.check_runtime(repo)
+
+
+def test_malformed_build_manifest_does_not_bypass_pinned_checks(tmp_path):
+    target=tmp_path/'binding-build.json'
+    target.write_text('[]')
+    assert not setup.verified_local_binding(tmp_path,'optitrack_cam.cp311-win_amd64.pyd',b'changed')
