@@ -56,6 +56,7 @@ def test_install_commands_target_only_the_isolated_environment(monkeypatch, tmp_
     # The test never invokes a real installer or writes to the working .venv.
     monkeypatch.setattr(setup, "REPO", tmp_path)
     monkeypatch.setattr(setup.sys, "platform", "win32")
+    monkeypatch.setattr(setup.sys, "version_info", (3, 11, 4, "final", 0))
     folder = tmp_path / ".venv-wilor"
     python = folder / "Scripts/python.exe"
     python.parent.mkdir(parents=True)
@@ -80,6 +81,7 @@ def test_install_commands_target_only_the_isolated_environment(monkeypatch, tmp_
 def test_foreign_existing_environment_is_preserved(monkeypatch, tmp_path):
     monkeypatch.setattr(setup, "REPO", tmp_path)
     monkeypatch.setattr(setup.sys, "platform", "win32")
+    monkeypatch.setattr(setup.sys, "version_info", (3, 11, 4, "final", 0))
     folder = tmp_path / ".venv-wilor"
     folder.mkdir()
     (folder / "user-file.txt").write_text("preserve")
