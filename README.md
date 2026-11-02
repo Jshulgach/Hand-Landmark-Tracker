@@ -41,6 +41,23 @@ pose, or everything in the window. Use `--source 1` for another camera or
 `--source path/to/video.mp4` for a video.
 For source development, clone this repository and install `.[gui]` instead.
 
+## Experimental WiLoR hands
+
+Source checkouts include optional WiLoR inference with projected mesh/joint
+preview and a `WiLoRTracker` Python frame API. Use the
+[WiLoR setup guide](docs/wilor.md) to create its separate `.venv-wilor`
+environment, obtain MANO and download checksum-verified checkpoints.
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor
+```
+
+The live Studio model selector can switch between MediaPipe and WiLoR.
+Real CPU inference and a live hand overlay have been checked; RTX 3060 inference,
+fast mode and accuracy benchmarks remain pending. This first integration supports
+single-source hand preview and the frame API. Advanced OptiTrack reconstruction,
+recording and streaming use the existing estimator paths.
+
 ## Include MAVIS in your project
 
 The base package does not require Qt, pandas, or LSL. Add `mavis-track`

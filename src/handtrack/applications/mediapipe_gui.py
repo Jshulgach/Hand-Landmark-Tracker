@@ -1,4 +1,4 @@
-"""Unified single-camera GUI for MediaPipe hands, face, pose, and holistic."""
+"""Live preview with selectable MediaPipe or experimental WiLoR inference."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -35,9 +36,19 @@ _MODE_LABELS = {
 class MediaPipeTrackerGUI(QMainWindow):
     """A compact preview GUI with runtime-selectable body tracking."""
 
-    def __init__(self, source: int | str = 0, mode: str = "hands") -> None:
+    def __init__(self, source: int | str = 0, mode: str = "hands", *,
+                 model: str = "mediapipe", wilor_root=None, wilor_device="auto",
+                 wilor_fast=False) -> None:
         super().__init__()
         self.source = source
+        if model not in ("mediapipe", "wilor"):
+            raise ValueError("model must be mediapipe or wilor")
+        if model == "wilor" and TrackingMode.parse(mode) is not TrackingMode.HANDS:
+            raise ValueError("WiLoR supports hands only")
+        self._model = model
+        self._wilor_options = dict(wilor_root=wilor_root, wilor_device=wilor_device,
+                                   wilor_fast=wilor_fast)
+        self._restart_requested = False
         self.worker: PreviewWorker | None = None
         self._mode = TrackingMode.parse(mode)
         self._closing = False
@@ -57,6 +68,14 @@ class MediaPipeTrackerGUI(QMainWindow):
         layout = QVBoxLayout(root)
         controls = QHBoxLayout()
 
+        controls.addWidget(QLabel("Model"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("MediaPipe", "mediapipe")
+        self.model_combo.addItem("WiLoR", "wilor")
+        self.model_combo.setToolTip("WiLoR integration is experimental; see the setup and validation guide.")
+        self.model_combo.setCurrentIndex(1 if self._model == "wilor" else 0)
+        self.model_combo.currentIndexChanged.connect(self._change_model)
+        controls.addWidget(self.model_combo)
         controls.addWidget(QLabel("Tracking mode"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(_MODE_LABELS)
@@ -68,6 +87,7 @@ class MediaPipeTrackerGUI(QMainWindow):
         self.mode_combo.setCurrentText(selected_label)
         self.mode_combo.currentTextChanged.connect(self._change_mode)
         controls.addWidget(self.mode_combo)
+        self.mode_combo.setEnabled(self._model != "wilor")
 
         self.toggle_button = QPushButton("Stop camera")
         self.toggle_button.clicked.connect(self._toggle)
@@ -75,12 +95,15 @@ class MediaPipeTrackerGUI(QMainWindow):
         controls.addStretch(1)
 
         self.status = QLabel()
-        controls.addWidget(self.status)
+        self.status.setWordWrap(True)
         layout.addLayout(controls)
+        layout.addWidget(self.status)
 
         self.preview = QLabel("Starting camera…")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumSize(640, 480)
+        self.preview.setMinimumSize(240, 180)
+        self.preview.setWordWrap(True)
+        self.preview.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.preview.setStyleSheet("background: #111; color: #ddd;")
         layout.addWidget(self.preview, 1)
         self.setCentralWidget(root)
@@ -91,7 +114,7 @@ class MediaPipeTrackerGUI(QMainWindow):
         self.preview.clear()
         self.preview.setText("Starting camera…")
         self.status.setText("Starting…")
-        self.worker = PreviewWorker(self.source, self._mode)
+        self.worker = PreviewWorker(self.source, self._mode, model=self._model, **self._wilor_options)
         self.worker.start()
         self.timer.start(16)
         self.toggle_button.setEnabled(True)
@@ -102,6 +125,7 @@ class MediaPipeTrackerGUI(QMainWindow):
             self.worker.request_stop()
             self.toggle_button.setEnabled(False)
             self.mode_combo.setEnabled(False)
+            self.model_combo.setEnabled(False)
             self.preview.clear()
             self.preview.setText("Closing camera…" if self._closing else "Stopping camera…")
             self.status.setText("Stopping…")
@@ -111,6 +135,18 @@ class MediaPipeTrackerGUI(QMainWindow):
             self._stop()
         else:
             self._start()
+
+    def _change_model(self, *_):
+        self._model = self.model_combo.currentData()
+        if self._model == "wilor":
+            self._mode = TrackingMode.HANDS
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText("Hands")
+            self.mode_combo.blockSignals(False)
+        self.mode_combo.setEnabled(self._model != "wilor")
+        if self.worker is not None:
+            self._restart_requested = True
+            self._stop()
 
     def _change_mode(self, label: str) -> None:
         self._mode = _MODE_LABELS[label]
@@ -133,7 +169,7 @@ class MediaPipeTrackerGUI(QMainWindow):
                 self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview.setPixmap(pixmap)
             self.status.setText(error or
-                f"{packet.mode.value.title()} · {packet.detections} detected · {packet.fps:.1f} FPS")
+                f"{self._model} | {packet.mode.value.title()} · {packet.detections} detected · {packet.fps:.1f} FPS")
         elif state == "running" and published_at is not None and time.perf_counter() - published_at > 1:
             self.preview.clear()
             self.preview.setText("Waiting for new frames…")
@@ -151,14 +187,18 @@ class MediaPipeTrackerGUI(QMainWindow):
             self.timer.stop()
             self.toggle_button.setText("Start camera")
             self.toggle_button.setEnabled(True)
-            self.mode_combo.setEnabled(True)
+            self.mode_combo.setEnabled(self._model != "wilor")
+            self.model_combo.setEnabled(True)
             self.preview.clear()
             message = error or ("Source ended or camera disconnected. Start to retry."
                                 if state == "ended" else "Stopped")
             self.preview.setText(message)
-            self.status.setText(message)
+            self.status.setText("WiLoR unavailable" if error and self._model == "wilor" else message)
             if self._closing:
                 self.close()
+            elif self._restart_requested:
+                self._restart_requested = False
+                self._start()
 
     def closeEvent(self, event) -> None:
         if self.worker is not None:
@@ -182,10 +222,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=[mode.value for mode in TrackingMode],
         default=TrackingMode.HANDS.value,
     )
+    parser.add_argument("--model", choices=("mediapipe", "wilor"), default="mediapipe")
+    parser.add_argument("--wilor-root", help="official WiLoR source and asset directory")
+    parser.add_argument("--wilor-device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--wilor-fast", action="store_true", help="CUDA FP16 and depth pruning")
     args = parser.parse_args(argv)
+    if args.model == "wilor" and args.mode != "hands":
+        parser.error("WiLoR supports hands only; use --mode hands")
 
     app = QApplication.instance() or QApplication(sys.argv)
-    window = MediaPipeTrackerGUI(_parse_source(args.source), args.mode)
+    window = MediaPipeTrackerGUI(
+        _parse_source(args.source), args.mode, model=args.model,
+        wilor_root=args.wilor_root, wilor_device=args.wilor_device, wilor_fast=args.wilor_fast)
     window.show()
     return app.exec_()
 

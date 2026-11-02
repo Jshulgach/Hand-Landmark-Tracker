@@ -46,6 +46,7 @@ nav:
   - Research data: research-data.md
   - CLI: cli.md
   - Backends: backends.md
+  - WiLoR (experimental): wilor.md
   - Model roadmap: mmpose-comparison.md
   - Troubleshooting: troubleshooting.md
   - Releases: releases.md

@@ -185,6 +185,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser.add_argument("--source", default="0")
     demo_parser.add_argument("--mode", choices=("hands", "face", "pose", "holistic"), default="hands")
 
+    for preview_parser in (gui_parser, demo_parser):
+        preview_parser.add_argument("--model", choices=("mediapipe", "wilor"), default="mediapipe")
+        preview_parser.add_argument("--wilor-root", help="official WiLoR source and asset directory")
+        preview_parser.add_argument("--wilor-device", choices=("auto", "cpu", "cuda"), default="auto")
+        preview_parser.add_argument("--wilor-fast", action="store_true", help="CUDA FP16 and depth pruning")
+
     calibrate_parser = subparsers.add_parser(
         "calibrate",
         help="launch the multi-camera ChArUco calibration workflow",
@@ -375,6 +381,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_backend_argument(doctor_parser)
     doctor_parser.add_argument("--gui", action="store_true")
+    doctor_parser.add_argument("--model", choices=("mediapipe", "wilor"), default="mediapipe")
+    doctor_parser.add_argument("--wilor-root", help="official WiLoR source and asset directory")
 
     return parser
 
@@ -382,6 +390,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "doctor" and args.model == "wilor":
+        from ._wilor_doctor import run
+        return run(args.wilor_root)
+
+    if getattr(args, "model", "mediapipe") == "wilor":
+        if args.mode != "hands":
+            parser.error("WiLoR supports hands only; use --mode hands")
+        if args.command == "gui" and (args.advanced_hands or args.backend == "optitrack"):
+            parser.error("WiLoR currently supports single-source preview/API; use demo --model wilor")
+        if args.command == "gui" and args.backend == "auto":
+            args.backend = "webcam"
 
     selected_backend = None
     if hasattr(args, "backend"):
@@ -394,7 +414,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .mediapipe_gui import main as demo_main
         except ImportError as exc:
             parser.error(f"Install the desktop extra: pip install 'mavis-track[gui]' ({exc})")
-        return int(demo_main(["--source", args.source, "--mode", args.mode]))
+        preview_args = ["--source", args.source, "--mode", args.mode, "--model", args.model,
+                        "--wilor-device", args.wilor_device]
+        if args.wilor_root is not None:
+            preview_args.extend(["--wilor-root", args.wilor_root])
+        if args.wilor_fast:
+            preview_args.append("--wilor-fast")
+        return int(demo_main(preview_args))
 
     if args.command == "doctor":
         if args.gui:

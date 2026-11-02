@@ -67,3 +67,10 @@ calibration_data/
 !/external/upgrade_optitrack.py
 !/external/Activate.cmd
 !/external/Activate.ps1
+
+# Optional WiLoR environment and large/licensed inference assets
+.venv-wilor/
+*.ckpt
+*.pt
+MANO_RIGHT.pkl
+MANO_LEFT.pkl

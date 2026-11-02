@@ -13,12 +13,18 @@ __all__ = [
     "QualityFlag",
     "Session",
     "TrackingQuality",
+    "WiLoRFrameResult",
+    "WiLoRHandResult",
+    "WiLoRTracker",
     "iter_session_chunks",
     "load_session",
 ]
 
 
 def __getattr__(name):
+    if name in {"WiLoRTracker", "WiLoRHandResult", "WiLoRFrameResult"}:
+        from . import wilor
+        return getattr(wilor, name)
     if name in {"HandBodyTracker", "HandBodyFrameResult", "BodyResult", "TrackingQuality",
                 "QualityFlag", "BODY_LANDMARK_NAMES", "QUALITY_REGION_NAMES"}:
         from . import body

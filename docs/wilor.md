@@ -1,0 +1,267 @@
+# Experimental WiLoR hand inference
+
+MAVIS includes an optional experimental adapter to the
+[official WiLoR implementation](https://github.com/rolpotamias/WiLoR).
+It provides a caller-owned frame API and webcam/video preview with projected mesh
+wireframes and joints. The Studio model selector switches between MediaPipe and
+WiLoR, releasing the old model/camera before starting the replacement off the Qt
+thread. Nothing is recorded by this preview.
+
+## Validation status and scope
+
+Software tests cover geometry, ownership, timestamps, association, installer
+integrity, environment targeting, model switching and cleanup without requiring
+licensed assets in CI.
+
+On **2 November 2026**, real inference was also verified on Windows/Python 3.11
+using the isolated environment below and the SHA-256-verified official checkpoints:
+
+- A 1920 x 1080 frame from the repository's `HandDynamic.mp4` produced one right
+  hand, 21 finite 3D joints and 778 finite mesh vertices. The projected overlay
+  was inspected for gross alignment with the hand.
+- That single CPU observation loaded the models in 14.7 seconds and processed
+  the reference frame in 3.42 seconds using four CPU threads. This is **not** a
+  controlled throughput or accuracy benchmark.
+- Webcam 0 supplied three 640 x 480 frames and completed inference/cleanup.
+  Those initial samples returned zero hand detections. During the subsequent
+  native CPU preview, the operator confirmed that the mesh/joint overlay appeared
+  for their hand. This is an operator observation, not a measured accuracy result.
+- The native Qt CPU preview opened and published camera frames; its timer
+  continued ticking while the model loaded. Nothing was recorded.
+- The target RTX 3060 is in another computer. This development computer has
+  Intel Iris Xe graphics: CUDA 11.8 binaries are installed, but CUDA availability
+  is false here. **GPU inference, fast mode, GPU memory use and live GPU speed
+  remain unverified.**
+
+Pose/angle accuracy, infrared-camera performance, difficult occlusions and
+long-session behavior still need evaluation. A plausible mesh is not an accuracy
+measurement.
+
+This first adapter supports **hands only**, with up to two detected hands.
+Face/body/holistic modes remain MediaPipe. WiLoR is not yet connected to the
+advanced OptiTrack GUI, calibrated triangulation, recording, UDP or LSL. Explicit
+unsupported CLI combinations fail rather than silently selecting MediaPipe.
+A Python caller can supply frames from any camera, including OptiTrack, but must
+own capture and any multi-camera association/synchronization.
+
+A good-looking mesh in a web demo does not establish joint-angle accuracy or
+performance on our infrared camera images. See the evaluation plan below.
+
+## Source, assets and disk use
+
+Keep one ignored source/assets directory, shared by the checkout and any local
+environments. Branches contain our adapter, not a second copy of model weights.
+Switching Git branches alone does not reduce environment or checkpoint disk use.
+
+The integration was inspected against upstream revision
+`fcb911312a38fa8badd30d9656a167485d61b8f9`. To prepare a small source checkout
+from the MAVIS repository root:
+
+```powershell
+git clone --depth 1 --filter=blob:none --sparse https://github.com/rolpotamias/WiLoR.git external/WiLoR
+git -C external/WiLoR sparse-checkout set wilor mano_data pretrained_models
+git -C external/WiLoR rev-parse HEAD
+```
+
+If the displayed revision differs, treat it as a new runtime version requiring
+validation. The inspected checkout already includes `model_config.yaml` and
+`mano_mean_params.npz`; it does not include inference checkpoints or MANO.
+
+Required layout:
+
+```text
+external/WiLoR/
+  wilor/...
+  pretrained_models/
+    model_config.yaml
+    detector.pt
+    wilor_final.ckpt
+  mano_data/
+    mano_mean_params.npz
+    MANO_RIGHT.pkl
+```
+
+Obtain `MANO_RIGHT.pkl` yourself by registering and downloading from the
+[MANO website](https://mano.is.tue.mpg.de/) under its license; extract the right
+model into the layout above. It is not included in MAVIS or downloaded by us.
+
+The [upstream installation instructions](https://github.com/rolpotamias/WiLoR#installation)
+link the detector and reconstruction checkpoints. The reconstruction checkpoint
+alone is 2.39 GiB (about 2.56 GB); PyTorch/CUDA add substantial environment disk use.
+These commands are optional manual downloads, not part of MAVIS installation:
+
+```powershell
+curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt" -o external/WiLoR/pretrained_models/detector.pt
+curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/wilor_final.ckpt" -o external/WiLoR/pretrained_models/wilor_final.ckpt
+```
+
+## Isolated Windows environment
+
+The tested profile is 64-bit Windows/Python 3.11, PyTorch **2.7.1+cu118**,
+torchvision **0.22.1+cu118**, NumPy **1.26.4**, Lightning **2.5.2** and
+Ultralytics **8.3.161**. The complete resolved dependency set lives in
+`requirements/wilor-windows-cu118.txt`; its input pins are in the adjacent
+`.in` file. This supersedes the earlier proposed Torch 2.0 profile.
+[PyTorch provides this CUDA 11.8 pairing](https://pytorch.org/get-started/previous-versions/#v271).
+
+The runtime includes MAVIS's normal dependencies so the model selector can
+also use MediaPipe. Both OpenCV distribution names required by the upstream
+packages are pinned to the same 4.11.0.86 release. Training datasets, Gradio,
+XTCocoTools and an additional CUDA development toolkit are not installed.
+
+`scripts/setup_wilor.py` installs **only** into `.venv-wilor`, explicitly
+targeting that interpreter and subprocess environment. It preserves the working
+`.venv`. It uses `uv` if available, with a tested `pip` fallback.
+Chumpy's pinned Git revision needs pip available during its legacy build, so
+the installer bootstraps build tooling and disables build isolation for that
+package. The old detector checkpoint also needs `dill`, which is explicitly
+pinned. Runtime Ultralytics auto-installs and settings sync are disabled.
+
+On the **RTX 3060 computer**, from the repository root:
+
+```powershell
+git fetch origin
+git switch main
+git pull --ff-only
+py -3.11 scripts/setup_wilor.py --prepare-source
+```
+
+Now copy your licensed `MANO_RIGHT.pkl` into
+`external/WiLoR/mano_data/MANO_RIGHT.pkl`. Then:
+
+```powershell
+py -3.11 scripts/setup_wilor.py --download-checkpoints --install --require-cuda
+```
+
+This checks out the inspected upstream revision, downloads only the two required
+checkpoints at a pinned Hugging Face revision, verifies size/SHA-256 and installs
+the locked packages in the separate environment. Downloads can resume; an existing
+different checkpoint is preserved and reported. Existing matching downloads are
+reused. The `--require-cuda` check requires CUDA availability and a successful
+GPU tensor operation; it fails explicitly on a CPU-only machine.
+
+Alternatively, copy the already prepared `external/WiLoR` folder from the
+development computer, including its source and models, then use
+`--install --require-cuda`. A virtual environment contains computer-specific
+paths and must be recreated rather than copied.
+
+To inspect an existing setup without installing or downloading:
+
+```powershell
+py -3.11 scripts/setup_wilor.py --check --require-cuda
+./.venv-wilor/Scripts/python.exe -m mavis_track doctor --model wilor
+```
+
+The doctor reports assets, versions and GPU details without loading checkpoints
+or opening cameras. Asset/package checks do not prove inference accuracy.
+
+## RTX 3060 target computer
+
+NVIDIA lists the RTX 3060 as
+[CUDA compute capability 8.6](https://developer.nvidia.com/cuda/gpus).
+Record its actual VRAM and driver version rather than assuming a memory size:
+
+```powershell
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+```
+
+After installation, test a known positive video before using a webcam:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source docs/source/_static/HandDynamic.mp4 --wilor-device cuda --wilor-fast
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-device cuda --wilor-fast
+```
+
+Keep the whole hand in the image. Compare standard and fast modes separately;
+CPU timings above do not predict RTX 3060 throughput. Stop/close the window to
+release the camera. No recording is enabled by these commands.
+
+## Live preview
+
+Once the runtime and assets are available:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR
+# Explicit CUDA and accelerated inference:
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR --wilor-device cuda --wilor-fast
+# Video instead of webcam:
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source "C:/clips/hand.mp4" --wilor-root external/WiLoR
+```
+
+`--wilor-device auto` chooses CUDA if available, otherwise CPU. CPU inference
+is available as a code path, but live speed is unmeasured and may be unsuitable.
+Fast mode requires CUDA and enables upstream FP16 and backbone layer skipping;
+we do not invoke `torch.compile`, which adds platform-dependent compilation and
+startup cost. Measure its accuracy/speed tradeoff independently.
+
+The selector can return to MediaPipe for hand, body or face preview.
+Missing assets/dependencies appear as an error in the window; there is no
+automatic fallback to a different estimator.
+
+Use `--wilor-root` for a shared directory outside the checkout, or set
+`MAVIS_WILOR_ROOT`. Imports and model loading do not change the process working
+directory or download missing files.
+
+## Python frame API
+
+```python
+from mavis_track import WiLoRTracker
+
+# Your application supplies a uint8 BGR frame named frame.
+with WiLoRTracker(root="external/WiLoR", device="auto") as tracker:
+    result = tracker.process(frame, color="bgr", timestamp=1.0)
+    for hand in result.hands:
+        image_xy = hand.image_landmarks       # (21, 2), pixels
+        joints = hand.joints                 # (21, 3), wrist-relative model meters
+        vertices = hand.vertices             # (778, 3), same origin as joints
+        angles = hand.angles                 # 14 geometric flexion estimates, degrees
+        triangles = tracker.faces            # mesh triangle vertex indices
+```
+
+Use increasing seconds for caller timestamps. Without a timestamp, the API uses
+a monotonic clock. Close the tracker when finished; it also supports a context
+manager. Input frames are not modified, and result arrays are owned/read-only.
+
+The 21-joint order is wrist, thumb, index, middle, ring, little finger, matching
+the order already supplied by WiLoR's MANO wrapper. It must not be reordered a
+second time. Left-hand crops and camera x translation are reflected back before
+full-image projection.
+
+3D axes are x right, y down, z away from the camera. Joints and vertices are
+centered at the wrist; `wrist_camera_translation` is an **estimated** position
+using WiLoR's assumed focal length, not calibrated metric position. The result
+explicitly labels image pixels, wrist-relative model coordinates and estimated
+camera translation. These are separate types from MediaPipe results so that
+different z/scale conventions cannot be silently interchanged.
+
+`detection_score` is the hand detector's box score, not joint visibility,
+handedness probability or reconstruction accuracy. WiLoR does not supply
+calibrated per-joint confidence here. IDs associate nearby same-handed detections
+between adjacent frames; they reset after absence or a gap over 0.5 seconds.
+They do not identify people. Angles remain model-derived geometric estimates.
+
+## Accuracy and performance validation
+
+1. Verify one reference RGB image against the pinned upstream demo: left/right
+   labels, projected joints, mesh and camera translation.
+2. Test a webcam and our infrared camera frames, including darkness, occlusion,
+   motion blur, extreme wrist poses and two overlapping hands.
+3. Compare MediaPipe/WiLoR on identical frames with labelled or independently
+   measured reference data. Report joint/angle errors, detection misses,
+   left/right swaps, temporal jitter and failure recovery separately.
+4. Measure startup, steady-state latency p50/p95, frame age, throughput and peak
+   GPU memory, separately for standard and fast mode.
+5. Only then connect WiLoR's 2D projections to calibrated multi-camera
+   reconstruction. Keep monocular estimates distinct from triangulated data;
+   assess camera distortion and cross-view hand association explicitly.
+
+WiLoR improves hand inference capabilities; it does not replace the equal-priority
+whole-body evaluation described in the [model roadmap](mmpose-comparison.md).
+
+## Licensing
+
+WiLoR's upstream repository/model license is
+[CC BY-NC-ND 4.0](https://github.com/rolpotamias/WiLoR/blob/main/license.txt).
+MANO and Ultralytics have separate terms linked by upstream. These dependencies
+and assets are not relicensed under MAVIS's MIT license. This branch distributes
+our adapter only, not upstream source, checkpoints or MANO assets.

@@ -131,3 +131,10 @@ These controls require binding API v2. The historical binding restored by
 available, and the panel explains that a binding upgrade is required. `doctor`
 reports this separately under `optitrack:illumination`. See the
 [prebuilt binding installation](installation.md#install-the-prebuilt-illumination-binding).
+
+## Optional WiLoR hand model
+
+The optional experimental WiLoR integration provides a frame API and
+single-source mesh/joint preview. Model choice is separate from camera backend.
+See [WiLoR setup and validation status](wilor.md). The advanced OptiTrack GUI
+continues to use MediaPipe; WiLoR multi-camera reconstruction is not yet integrated.

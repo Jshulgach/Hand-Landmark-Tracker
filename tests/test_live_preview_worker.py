@@ -214,3 +214,57 @@ def test_inference_error_clears_preview_and_releases_resources(monkeypatch):
     packet, _, status, error, _ = worker.poll()
     assert packet is None and status == 'error' and 'inference failed' in error
     assert state['closed'] and state['released'] and not worker.is_alive()
+
+
+
+def test_wilor_switch_releases_previous_capture_before_loading(monkeypatch, app):
+    from handtrack.applications import _wilor_preview
+    gate = threading.Event()
+    state, entered = factories(monkeypatch, read_gate=gate)
+    loaded = threading.Event()
+    class WiLoR:
+        mode = TrackingMode.HANDS
+        def __init__(self, **kwargs):
+            assert state["closed"] and state["released"]
+            state["wilor_owner"] = threading.get_ident()
+            loaded.set()
+        def process(self, rgb):
+            return SimpleNamespace(hands=[])
+        def draw(self, frame, result):
+            pass
+        def close(self):
+            state["wilor_closed"] = True
+    monkeypatch.setattr(_wilor_preview, "WiLoRModeTracker", WiLoR)
+    window = MediaPipeTrackerGUI(mode="pose")
+    try:
+        wait_until(entered.is_set, app)
+        window.model_combo.setCurrentIndex(1)
+        assert window.worker is not None and not loaded.is_set()
+        assert not window.mode_combo.isEnabled()
+        gate.set()
+        wait_until(loaded.is_set, app)
+        assert window._mode is TrackingMode.HANDS
+        assert state["wilor_owner"] != threading.get_ident()
+        window._stop()
+        wait_until(lambda: window.worker is None, app)
+        assert state["wilor_closed"]
+        window.model_combo.setCurrentIndex(0)
+        assert window.mode_combo.isEnabled()
+    finally:
+        gate.set()
+        window._closing = True
+        window.close()
+        wait_until(lambda: window.worker is None, app)
+
+
+def test_missing_wilor_assets_report_error_and_release_capture(monkeypatch, tmp_path):
+    state, _ = factories(monkeypatch)
+    worker = workers.PreviewWorker(model="wilor", wilor_root=tmp_path)
+    worker.start()
+    worker.join(3)
+    assert not worker.is_alive()
+    packet, _, status, error, _ = worker.poll()
+    assert packet is None and status == "error"
+    assert "MANO_RIGHT.pkl" in error and "assets missing" in error
+    assert state["released"]
+    assert not any(name == "model_open" for name, _ in state["operations"])
