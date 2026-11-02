@@ -7,3 +7,4 @@ prune src/unity_hand_tracking/optitrack_cam_py/Release
 prune src/unity_hand_tracking/optitrack_tools/code_base
 prune examples
 prune docs
+recursive-include requirements wilor-windows-cu118.in wilor-windows-cu118.txt

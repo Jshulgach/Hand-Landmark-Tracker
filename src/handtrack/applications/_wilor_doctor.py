@@ -20,7 +20,7 @@ def run(root=None):
         "torch": "torch", "torchvision": "torchvision", "pytorch_lightning": "pytorch-lightning",
         "ultralytics": "ultralytics", "smplx": "smplx", "yacs": "yacs",
         "timm": "timm", "einops": "einops", "skimage": "scikit-image",
-        "pyrender": "pyrender", "chumpy": "chumpy",
+        "pyrender": "pyrender", "chumpy": "chumpy", "dill": "dill",
     }
     for module, distribution in packages.items():
         try:

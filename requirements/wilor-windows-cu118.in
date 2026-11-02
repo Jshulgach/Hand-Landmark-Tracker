@@ -1,0 +1,27 @@
+# Windows/Python 3.11 inference environment, separate from the working .venv.
+# CUDA-capable Torch wheels also support CPU verification without an NVIDIA GPU.
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.7.1+cu118
+torchvision==0.22.1+cu118
+numpy==1.26.4
+scipy==1.15.3
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
+pytorch-lightning==2.5.2
+torchmetrics==1.7.3
+ultralytics==8.3.161
+smplx==0.1.28
+timm==0.9.12
+einops==0.8.1
+scikit-image==0.25.2
+yacs==0.1.8
+pyrender==0.1.45
+trimesh==4.7.1
+chumpy @ git+https://github.com/mattloper/chumpy.git@580566eafc9ac68b2614b64d6f7aaa84eebb70da
+mediapipe==0.10.14
+jax==0.4.35
+jaxlib==0.4.35
+PyQt5==5.15.11
+pyqtgraph==0.13.7
+tqdm==4.67.1
+dill==0.4.1

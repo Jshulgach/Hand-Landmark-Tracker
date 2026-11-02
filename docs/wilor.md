@@ -9,12 +9,33 @@ thread. Nothing is recorded by this preview.
 
 ## Validation status and scope
 
-Software tests cover crop projection, left-hand reflection, wrist centering,
-coordinate labels, color conversion, timestamps, array ownership, association,
-cleanup and command routing using synthetic predictions. **Real WiLoR inference,
-Windows dependency compatibility, accuracy, latency and GPU memory use have not
-yet been validated in this integration.** The licensed MANO asset is not available
-on the development computer, and its GPU is Intel Iris Xe rather than NVIDIA.
+Software tests cover geometry, ownership, timestamps, association, installer
+integrity, environment targeting, model switching and cleanup without requiring
+licensed assets in CI.
+
+On **2 November 2026**, real inference was also verified on Windows/Python 3.11
+using the isolated environment below and the SHA-256-verified official checkpoints:
+
+- A 1920 x 1080 frame from the repository's `HandDynamic.mp4` produced one right
+  hand, 21 finite 3D joints and 778 finite mesh vertices. The projected overlay
+  was inspected for gross alignment with the hand.
+- That single CPU observation loaded the models in 14.7 seconds and processed
+  the reference frame in 3.42 seconds using four CPU threads. This is **not** a
+  controlled throughput or accuracy benchmark.
+- Webcam 0 supplied three 640 x 480 frames and completed inference/cleanup.
+  Those initial samples returned zero hand detections. During the subsequent
+  native CPU preview, the operator confirmed that the mesh/joint overlay appeared
+  for their hand. This is an operator observation, not a measured accuracy result.
+- The native Qt CPU preview opened and published camera frames; its timer
+  continued ticking while the model loaded. Nothing was recorded.
+- The target RTX 3060 is in another computer. This development computer has
+  Intel Iris Xe graphics: CUDA 11.8 binaries are installed, but CUDA availability
+  is false here. **GPU inference, fast mode, GPU memory use and live GPU speed
+  remain unverified.**
+
+Pose/angle accuracy, infrared-camera performance, difficult occlusions and
+long-session behavior still need evaluation. A plausible mesh is not an accuracy
+measurement.
 
 This first adapter supports **hands only**, with up to two detected hands.
 Face/body/holistic modes remain MediaPipe. WiLoR is not yet connected to the
@@ -66,7 +87,7 @@ model into the layout above. It is not included in MAVIS or downloaded by us.
 
 The [upstream installation instructions](https://github.com/rolpotamias/WiLoR#installation)
 link the detector and reconstruction checkpoints. The reconstruction checkpoint
-alone is roughly 2.4 GB; PyTorch/CUDA add substantial environment disk use.
+alone is 2.39 GiB (about 2.56 GB); PyTorch/CUDA add substantial environment disk use.
 These commands are optional manual downloads, not part of MAVIS installation:
 
 ```powershell
@@ -74,75 +95,97 @@ curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main
 curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/wilor_final.ckpt" -o external/WiLoR/pretrained_models/wilor_final.ckpt
 ```
 
-## Environment
+## Isolated Windows environment
 
-Use a separate `.venv-wilor`; keep the working MAVIS/OptiTrack `.venv` intact.
-Do not install large GPU dependencies until the target computer's GPU/driver and
-available disk space are known. Choose a compatible Torch/torchvision pair using
-[PyTorch's installer](https://pytorch.org/get-started/locally/) and the
-[upstream tested environment](https://github.com/rolpotamias/WiLoR#installation),
-which uses Python 3.10, Torch 2.0 and CUDA 11.7. That older CUDA build is not a
-blanket recommendation for newer GPUs.
+The tested profile is 64-bit Windows/Python 3.11, PyTorch **2.7.1+cu118**,
+torchvision **0.22.1+cu118**, NumPy **1.26.4**, Lightning **2.5.2** and
+Ultralytics **8.3.161**. The complete resolved dependency set lives in
+`requirements/wilor-windows-cu118.txt`; its input pins are in the adjacent
+`.in` file. This supersedes the earlier proposed Torch 2.0 profile.
+[PyTorch provides this CUDA 11.8 pairing](https://pytorch.org/get-started/previous-versions/#v271).
 
-Follow the upstream dependency instructions inside that separate environment,
-then install this branch with its GUI:
+The runtime includes MAVIS's normal dependencies so the model selector can
+also use MediaPipe. Both OpenCV distribution names required by the upstream
+packages are pinned to the same 4.11.0.86 release. Training datasets, Gradio,
+XTCocoTools and an additional CUDA development toolkit are not installed.
+
+`scripts/setup_wilor.py` installs **only** into `.venv-wilor`, explicitly
+targeting that interpreter and subprocess environment. It preserves the working
+`.venv`. It uses `uv` if available, with a tested `pip` fallback.
+Chumpy's pinned Git revision needs pip available during its legacy build, so
+the installer bootstraps build tooling and disables build isolation for that
+package. The old detector checkpoint also needs `dill`, which is explicitly
+pinned. Runtime Ultralytics auto-installs and settings sync are disabled.
+
+On the **RTX 3060 computer**, from the repository root:
 
 ```powershell
-python -m pip install -e ".[gui]"
-python -m mavis_track doctor --model wilor --wilor-root external/WiLoR
+git fetch origin
+git switch codex/wilor-backend
+git pull --ff-only
+py -3.11 scripts/setup_wilor.py --prepare-source
 ```
 
-The upstream requirements include training/demo dependencies and older libraries;
-a minimal, reproducible Windows inference lockfile is pending validation on the
-target GPU. In particular, newer Torch checkpoint-loading defaults and NumPy /
-Chumpy / Ultralytics / OpenCV combinations need checking. Avoid upgrading the
-working environment to resolve these. The WiLoR doctor reports assets, package
-versions and CUDA/GPU details without loading checkpoints or opening cameras;
-an `ok` dependency check is not proof that inference works.
+Now copy your licensed `MANO_RIGHT.pkl` into
+`external/WiLoR/mano_data/MANO_RIGHT.pkl`. Then:
+
+```powershell
+py -3.11 scripts/setup_wilor.py --download-checkpoints --install --require-cuda
+```
+
+This checks out the inspected upstream revision, downloads only the two required
+checkpoints at a pinned Hugging Face revision, verifies size/SHA-256 and installs
+the locked packages in the separate environment. Downloads can resume; an existing
+different checkpoint is preserved and reported. Existing matching downloads are
+reused. The `--require-cuda` check requires CUDA availability and a successful
+GPU tensor operation; it fails explicitly on a CPU-only machine.
+
+Alternatively, copy the already prepared `external/WiLoR` folder from the
+development computer, including its source and models, then use
+`--install --require-cuda`. A virtual environment contains computer-specific
+paths and must be recreated rather than copied.
+
+To inspect an existing setup without installing or downloading:
+
+```powershell
+py -3.11 scripts/setup_wilor.py --check --require-cuda
+./.venv-wilor/Scripts/python.exe -m mavis_track doctor --model wilor
+```
+
+The doctor reports assets, versions and GPU details without loading checkpoints
+or opening cameras. Asset/package checks do not prove inference accuracy.
 
 ## RTX 3060 target computer
 
-The target computer has an NVIDIA RTX 3060 (operator reported 2 November 2026).
-NVIDIA lists it as [CUDA compute capability 8.6](https://developer.nvidia.com/cuda/gpus).
-This supports testing a CUDA runtime; throughput and memory use still require
-measurement. The development laptop's Intel GPU is a separate machine.
-
-On the RTX 3060 computer, collect the actual VRAM and driver version:
+NVIDIA lists the RTX 3060 as
+[CUDA compute capability 8.6](https://developer.nvidia.com/cuda/gpus).
+Record its actual VRAM and driver version rather than assuming a memory size:
 
 ```powershell
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
 ```
 
-Do not assume a particular amount of VRAM from the RTX 3060 name alone.
-A candidate close to upstream's tested Torch 2.0 family is Torch 2.0.1 with
-torchvision 0.15.2 and CUDA 11.8 wheels, a combination provided in
-[PyTorch's previous-version instructions](https://pytorch.org/get-started/previous-versions/#v201).
-This is a proposed compatibility test profile, not a validated WiLoR environment
-or complete dependency lock. Do not mix its packages into the working environment.
+After installation, test a known positive video before using a webcam:
 
-The next manual asset step is to register on the
-[MANO website](https://mano.is.tue.mpg.de/), agree to its license, download the
-MANO models archive and extract `MANO_RIGHT.pkl`. Put that file at:
-
-```text
-<Hand-Landmark-Tracker>/external/WiLoR/mano_data/MANO_RIGHT.pkl
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source docs/source/_static/HandDynamic.mp4 --wilor-device cuda --wilor-fast
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-device cuda --wilor-fast
 ```
 
-The inference adapter uses this right-hand MANO model for both hands, reflecting
-left-hand predictions back to the input image. A separate MANO_LEFT.pkl is not
-required by this adapter. Registration/license acceptance and this download must
-be completed by the model user; MAVIS does not obtain the asset on their behalf.
+Keep the whole hand in the image. Compare standard and fast modes separately;
+CPU timings above do not predict RTX 3060 throughput. Stop/close the window to
+release the camera. No recording is enabled by these commands.
 
 ## Live preview
 
 Once the runtime and assets are available:
 
 ```powershell
-python -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR
 # Explicit CUDA and accelerated inference:
-python -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR --wilor-device cuda --wilor-fast
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0 --wilor-root external/WiLoR --wilor-device cuda --wilor-fast
 # Video instead of webcam:
-python -m mavis_track demo --model wilor --source "C:/clips/hand.mp4" --wilor-root external/WiLoR
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source "C:/clips/hand.mp4" --wilor-root external/WiLoR
 ```
 
 `--wilor-device auto` chooses CUDA if available, otherwise CPU. CPU inference

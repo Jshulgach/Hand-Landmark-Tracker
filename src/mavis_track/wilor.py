@@ -99,6 +99,18 @@ def _project_hand(joints, vertices, camera, center, box_size, image_size, focal,
     return (*projected, joints - wrist, vertices - wrist, wrist + translation)
 
 
+def _detector_class(root: Path):
+    # Old detector checkpoints need undeclared dependencies. Never let their
+    # loader invoke an unscoped package manager against another environment.
+    os.environ["YOLO_AUTOINSTALL"] = "false"
+    os.environ.setdefault("YOLO_CONFIG_DIR", str(root / ".mavis-runtime"))
+    ultralytics = importlib.import_module("ultralytics")
+    checks: Any = importlib.import_module("ultralytics.utils.checks")
+    checks.AUTOINSTALL = False  # Also cover a host that imported it first.
+    ultralytics.settings.update({"sync": False})
+    return ultralytics.YOLO
+
+
 class _OfficialWiLoR:
     """Own heavyweight dependencies and models only when explicitly selected."""
 
@@ -118,7 +130,7 @@ class _OfficialWiLoR:
             sys.path.insert(0, source)
         try:
             torch = importlib.import_module("torch")
-            YOLO = importlib.import_module("ultralytics").YOLO
+            YOLO = _detector_class(root)
             WiLoR = importlib.import_module("wilor.models").WiLoR
             get_config = importlib.import_module("wilor.configs").get_config
             self.dataset = importlib.import_module("wilor.datasets.vitdet_dataset").ViTDetDataset

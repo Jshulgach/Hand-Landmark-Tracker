@@ -1,4 +1,5 @@
 """Geometry, lifecycle and optional-dependency contracts without model downloads."""
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -200,3 +201,25 @@ def test_wilor_doctor_reports_missing_assets_without_loading_checkpoints(monkeyp
     output = capsys.readouterr().out
     assert "MANO_RIGHT.pkl" in output and "not tested" in output
     assert "Camera SDK" not in output
+
+
+
+def test_detector_loader_disables_unscoped_installs_and_sync_even_if_preloaded(monkeypatch, tmp_path):
+    settings = {"sync": True}
+    checks = SimpleNamespace(AUTOINSTALL=True)
+    detector = object()
+    imported = []
+    def load(name):
+        assert os.environ["YOLO_AUTOINSTALL"] == "false"
+        imported.append(name)
+        if name == "ultralytics":
+            return SimpleNamespace(YOLO=detector, settings=settings)
+        assert name == "ultralytics.utils.checks"
+        return checks
+    monkeypatch.setenv("YOLO_AUTOINSTALL", "true")
+    monkeypatch.delenv("YOLO_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(wilor.importlib, "import_module", load)
+    assert wilor._detector_class(tmp_path) is detector
+    assert checks.AUTOINSTALL is False and settings["sync"] is False
+    assert os.environ["YOLO_CONFIG_DIR"] == str(tmp_path / ".mavis-runtime")
+    assert imported == ["ultralytics", "ultralytics.utils.checks"]
