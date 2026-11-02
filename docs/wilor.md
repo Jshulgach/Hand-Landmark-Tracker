@@ -1,6 +1,6 @@
 # Experimental WiLoR hand inference
 
-The `codex/wilor-backend` branch adds an optional adapter to the
+MAVIS includes an optional experimental adapter to the
 [official WiLoR implementation](https://github.com/rolpotamias/WiLoR).
 It provides a caller-owned frame API and webcam/video preview with projected mesh
 wireframes and joints. The Studio model selector switches between MediaPipe and
@@ -121,7 +121,7 @@ On the **RTX 3060 computer**, from the repository root:
 
 ```powershell
 git fetch origin
-git switch codex/wilor-backend
+git switch main
 git pull --ff-only
 py -3.11 scripts/setup_wilor.py --prepare-source
 ```
@@ -240,7 +240,7 @@ calibrated per-joint confidence here. IDs associate nearby same-handed detection
 between adjacent frames; they reset after absence or a gap over 0.5 seconds.
 They do not identify people. Angles remain model-derived geometric estimates.
 
-## Evaluation before promotion to main
+## Accuracy and performance validation
 
 1. Verify one reference RGB image against the pinned upstream demo: left/right
    labels, projected joints, mesh and camera translation.

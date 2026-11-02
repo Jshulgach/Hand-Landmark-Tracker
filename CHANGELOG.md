@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add experimental official WiLoR hand inference, a separate frame API with
+  explicit pixel/model coordinate spaces, and selectable live mesh/joint preview.
+- Add a pinned Windows/Python 3.11 CUDA-capable runtime installer with verified
+  resumable checkpoints and isolation from the working environment; disable
+  runtime package auto-installs and settings sync.
+- Verify real CPU hand reconstruction and an operator-confirmed live overlay.
+  GPU execution, fast mode, infrared performance and accuracy remain pending.
+
 - Publish a standalone Windows/Python 3.11 illumination binding and add a pinned
   prebuilt/offline ZIP installer with native preflight, backup and rollback.
   Keep auxiliary binding releases separate from PyPI/example publishing.

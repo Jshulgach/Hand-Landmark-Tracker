@@ -63,3 +63,17 @@ The live desktop studio performs capture, model initialization, inference and
 mode switching in a worker. The preview always uses the newest available frame.
 Stop and close remain responsive while native operations finish; the camera is
 released by its owning worker before another capture is started.
+
+## Optional WiLoR model
+
+After the [isolated WiLoR setup](wilor.md), source checkouts support:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor --source 0
+./.venv-wilor/Scripts/python.exe -m mavis_track doctor --model wilor
+```
+
+Use `--wilor-device cuda --wilor-fast` to request CUDA half precision and
+layer skipping, or `--wilor-root PATH` for a shared source/assets folder.
+WiLoR supports hands in single-source preview and the frame API. It is not yet
+connected to the advanced OptiTrack GUI, recording or streaming.

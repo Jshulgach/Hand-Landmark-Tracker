@@ -134,7 +134,7 @@ reports this separately under `optitrack:illumination`. See the
 
 ## Optional WiLoR hand model
 
-The experimental `codex/wilor-backend` branch adds a WiLoR frame API and
+The optional experimental WiLoR integration provides a frame API and
 single-source mesh/joint preview. Model choice is separate from camera backend.
 See [WiLoR setup and validation status](wilor.md). The advanced OptiTrack GUI
 continues to use MediaPipe; WiLoR multi-camera reconstruction is not yet integrated.
