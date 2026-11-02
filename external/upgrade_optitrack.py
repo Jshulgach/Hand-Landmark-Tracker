@@ -4,10 +4,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import ssl
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -24,12 +27,38 @@ MAX_DOWNLOAD = 2 * 1024 * 1024
 MAX_UNCOMPRESSED = 4 * 1024 * 1024
 
 
+def download_with_windows_tls():
+    # Schannel uses the Windows certificate store. Verification remains enabled.
+    curl = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32' / 'curl.exe'
+    if not curl.is_file():
+        raise RuntimeError('Python certificate verification failed and Windows curl is unavailable. '
+                           'Download the release ZIP in a trusted browser and use --binding-zip PATH.')
+    with tempfile.TemporaryDirectory(prefix='mavis-binding-download-') as folder:
+        destination = Path(folder) / 'binding.zip'
+        command = [str(curl), '--fail', '--location', '--silent', '--show-error',
+                   '--proto', '=https', '--proto-redir', '=https', '--max-time', '30',
+                   '--max-filesize', str(MAX_DOWNLOAD), '--output', str(destination), BUNDLE_URL]
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=35,
+                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if completed.returncode or not destination.is_file():
+            raise RuntimeError('Windows HTTPS download failed: ' + completed.stderr.strip())
+        if destination.stat().st_size > MAX_DOWNLOAD:
+            raise RuntimeError('Binding download exceeds the allowed size')
+        return destination.read_bytes()
+
+
 def download_bundle():
     if not BUNDLE_SHA256:
         raise RuntimeError('No verified binding release is configured yet')
     request = urllib.request.Request(BUNDLE_URL, headers={'User-Agent': 'MAVIS-binding-installer'})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = response.read(MAX_DOWNLOAD + 1)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read(MAX_DOWNLOAD + 1)
+    except urllib.error.URLError as exc:
+        if sys.platform != 'win32' or not isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise
+        print('Using Windows certificate-store HTTPS verification for this download.')
+        payload = download_with_windows_tls()
     if len(payload) > MAX_DOWNLOAD:
         raise RuntimeError('Binding download exceeds the allowed size')
     return payload

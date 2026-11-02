@@ -118,3 +118,53 @@ def test_mismatched_sdk_dll_is_never_replaced(release):
         installer.install_bundle(runtime,pack(files))
     assert (runtime/'CameraLibrary2015x64S.dll').read_bytes()==b'user SDK'
     assert (runtime/installer.BINDING).read_bytes()==old and not probes
+
+
+
+def test_certificate_store_fallback_keeps_verification_enabled(monkeypatch,release,tmp_path):
+    from types import SimpleNamespace
+    runtime,files,pack,old,dll,probes=release
+    payload=pack(files)
+    system=tmp_path/'Windows'
+    curl=system/'System32/curl.exe'
+    curl.parent.mkdir(parents=True)
+    curl.touch()
+    monkeypatch.setenv('SystemRoot',str(system))
+    calls=[]
+    def run(command,**kwargs):
+        calls.append(command)
+        assert command[0]==str(curl)
+        assert '--insecure' not in command and '-k' not in command
+        assert command[command.index('--proto')+1]=='=https'
+        assert command[command.index('--proto-redir')+1]=='=https'
+        Path(command[command.index('--output')+1]).write_bytes(payload)
+        return SimpleNamespace(returncode=0,stderr='')
+    monkeypatch.setattr(installer.subprocess,'run',run)
+    assert installer.download_with_windows_tls()==payload
+    assert len(calls)==1
+
+
+def test_python_certificate_error_uses_windows_store_only_on_windows(monkeypatch,release):
+    import ssl
+    import urllib.error
+    runtime,files,pack,old,dll,probes=release
+    payload=pack(files)
+    def failure(*args,**kwargs):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError('untrusted Python CA store'))
+    monkeypatch.setattr(installer.urllib.request,'urlopen',failure)
+    monkeypatch.setattr(installer.sys,'platform','win32')
+    monkeypatch.setattr(installer,'download_with_windows_tls',lambda:payload)
+    assert installer.download_bundle()==payload
+
+
+def test_http_errors_do_not_switch_tls_clients(monkeypatch,release):
+    import urllib.error
+    runtime,files,pack,old,dll,probes=release
+    pack(files)
+    def failure(*args,**kwargs):
+        raise urllib.error.URLError('HTTP connection error')
+    def unexpected():raise AssertionError('TLS fallback was not needed')
+    monkeypatch.setattr(installer.urllib.request,'urlopen',failure)
+    monkeypatch.setattr(installer,'download_with_windows_tls',unexpected)
+    with pytest.raises(urllib.error.URLError):
+        installer.download_bundle()

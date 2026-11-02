@@ -149,6 +149,10 @@ DLLs, headers or import libraries are included. The existing matched SDK DLL and
 separately installed USB drivers are still required; first-time setup follows
 the new-computer steps above. No C++ compiler is needed for this release.
 
+HTTPS certificate verification remains enabled. If Python cannot validate the
+certificate on Windows, the installer tries the Windows certificate store
+through the system curl client. The same pinned ZIP checksum is required.
+
 For an offline copy of the same release ZIP:
 
 ```bat
