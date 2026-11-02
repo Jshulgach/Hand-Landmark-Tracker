@@ -126,7 +126,20 @@ and records the installed build hash. Runtime recovery will not downgrade an
 identified local v2 build. The CameraLibrary DLL is still checked against the
 original pinned hash.
 
-The source includes no prebuilt lighting extension. The Windows compile-check
-workflow exports no native artifacts. Optional local bundle contents are the
-extension, manifest, MAVIS license/third-party notices and pybind11 license.
-Vendor DLLs, headers and import libraries are excluded.
+A small [prebuilt API v2 binding](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-v2)
+is available separately for Windows/Python 3.11 x64. Close MAVIS, activate its
+environment, and run:
+
+```bat
+python external/setup_optitrack.py --upgrade-binding
+python -m mavis_track doctor --backend optitrack --gui
+```
+
+This checks the pinned archive checksum and native imports before installation,
+preserves the original binding, and leaves the SDK DLL and USB drivers alone.
+For a downloaded/offline copy, use `--binding-zip PATH` instead. The ZIP contains
+only the extension, manifest, MAVIS license/third-party notices and pybind11
+license. Vendor DLLs, headers and import libraries are excluded.
+
+The workflow exports a ZIP only when explicitly requested through its manual
+`export_bundle` input; normal compile checks publish no native artifacts.

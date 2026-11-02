@@ -130,4 +130,4 @@ These controls require binding API v2. The historical binding restored by
 `setup_optitrack.py --from-history` has no illumination methods: preview remains
 available, and the panel explains that a binding upgrade is required. `doctor`
 reports this separately under `optitrack:illumination`. See the
-[binding build instructions](installation.md#build-the-illumination-capable-binding).
+[prebuilt binding installation](installation.md#install-the-prebuilt-illumination-binding).

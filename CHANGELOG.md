@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Publish a standalone Windows/Python 3.11 illumination binding and add a pinned
+  prebuilt/offline ZIP installer with native preflight, backup and rollback.
+  Keep auxiliary binding releases separate from PyPI/example publishing.
+
 - Add SDK-bounded IR intensity, high-power availability/readback and Max available
   controls for individual/all OptiTrack cameras in tracking and calibration.
 - Add calibration I/K intensity, M maximum and H high-power shortcuts, with

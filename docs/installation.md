@@ -125,6 +125,40 @@ and verify the expected camera count. An unset SDK environment variable is
 normal when the checkout runtime is found automatically.
 
 
+## Install the prebuilt illumination binding
+
+Close MAVIS and any Python process using the OptiTrack binding. With the
+**Python 3.11 x64** tracking environment active, update the checkout and run:
+
+```bat
+git pull --ff-only
+python external/setup_optitrack.py --upgrade-binding
+python -m mavis_track doctor --backend optitrack --gui
+python -m mavis_track gui --backend optitrack
+```
+
+The installer downloads the small
+[binding API v2 release](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-v2),
+verifies its pinned ZIP and extension checksums, checks native imports in a
+separate process, then installs it beside the existing SDK DLL. It preserves the
+original binding as a backup and rolls back if switching the files fails.
+Camera initialization, USB drivers and illumination settings are not changed.
+
+The release contains the extension, manifest and license notices only. No SDK
+DLLs, headers or import libraries are included. The existing matched SDK DLL and
+separately installed USB drivers are still required; first-time setup follows
+the new-computer steps above. No C++ compiler is needed for this release.
+
+For an offline copy of the same release ZIP:
+
+```bat
+python external/setup_optitrack.py --binding-zip "D:/downloads/optitrack-binding-cp311-win_amd64.zip"
+```
+
+After restart, `optitrack:illumination` should report that the binding is ready.
+Start capture to query the camera/hub capabilities, then use **Max available**
+or the individual controls. The installer does not turn the LEDs up automatically.
+
 ## Build the illumination-capable binding
 
 The default history-restored binding supports preview/exposure but lacks the
@@ -161,8 +195,7 @@ python -m mavis_track doctor --backend optitrack --gui
 availability is queried when capture starts. Native import verification does
 not establish real hardware lighting performance.
 
-The compile-check workflow builds/imports on Windows without uploading binary
-artifacts. No prebuilt illumination binding is distributed by this source
-branch. The helper's optional `--bundle` flag creates a local ZIP containing the
-extension, build manifest and license notices; it excludes all SDK DLLs, headers
-and import libraries and never uploads that ZIP.
+The build workflow normally verifies compilation/imports and local packaging.
+Its optional manual export uploads only the binding ZIP. The build helper's
+`--bundle` flag creates that ZIP locally; it excludes all SDK DLLs, headers
+and import libraries. The helper itself never uploads it.

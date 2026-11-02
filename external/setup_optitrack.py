@@ -124,11 +124,20 @@ def main(argv=None):
     group.add_argument('--runtime-dir', type=Path,
                        help='copy the matching runtime pair from another configured computer')
     group.add_argument('--check', action='store_true', help='verify interpreter and existing runtime checksums')
+    group.add_argument('--upgrade-binding', action='store_true', help='install the pinned illumination binding release')
+    group.add_argument('--binding-zip', type=Path, help='install an offline copy of the pinned release ZIP')
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[1]
     try:
         validate_interpreter()
-        target = check_runtime(repo) if args.check else restore_runtime(repo, args.runtime_dir)
+        if args.upgrade_binding or args.binding_zip is not None:
+            from upgrade_optitrack import upgrade_runtime
+            candidate = runtime_folder(repo)
+            target = check_runtime(repo) if all((candidate / name).is_file() for name in RUNTIME_FILES) else restore_runtime(repo)
+            target = upgrade_runtime(target, args.binding_zip)
+            check_runtime(repo)
+        else:
+            target = check_runtime(repo) if args.check else restore_runtime(repo, args.runtime_dir)
     except (OSError, RuntimeError) as exc:
         print(f'OptiTrack setup failed: {exc}', file=sys.stderr)
         return 1

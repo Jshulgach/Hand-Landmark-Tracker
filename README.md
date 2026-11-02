@@ -126,6 +126,13 @@ for the driver-only workflow and verified local runtime recovery for Python 3.11
 x64; source installations discover that runtime automatically.
 Use `OPTITRACK_CAM_PY_PATH` for another compatible binding.
 
+For the new illumination controls, close MAVIS and run
+`python external/setup_optitrack.py --upgrade-binding` in the Python 3.11 x64
+environment. This installs the checksum-verified binding-only release without
+a compiler. Start tracking afterward and choose **Max available** for one/all
+cameras; calibration also supports I/K intensity, M maximum and H high power.
+
+
 ## Development and release
 
 ```bash
