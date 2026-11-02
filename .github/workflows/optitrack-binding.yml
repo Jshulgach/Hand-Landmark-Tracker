@@ -1,4 +1,4 @@
-name: OptiTrack binding compile check
+name: OptiTrack binding
 on:
   push:
     branches: [codex/flex3-illumination]
@@ -9,6 +9,11 @@ on:
       - examples/01_basic_tracking/unity_hand_tracking/optitrack_tools/code_base/camera_sdk_pybind.cpp
       - examples/01_basic_tracking/unity_hand_tracking/optitrack_tools/code_base/CMakeLists.txt
   workflow_dispatch:
+    inputs:
+      export_bundle:
+        description: Upload only the verified binding ZIP (no vendor DLLs, headers or libraries)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -26,4 +31,10 @@ jobs:
       - run: python -m pip install pybind11==2.13.6 cmake==3.30.5
       - run: python external/setup_optitrack.py --from-history
       - run: python external/build_optitrack.py --restore-sdk --output .cache/optitrack-binding --bundle
-      # Compile/import and local packaging verification only. No artifact upload, release or binary export.
+      - uses: actions/upload-artifact@v4
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_bundle }}
+        with:
+          name: optitrack-binding-cp311-win_amd64
+          path: .cache/optitrack-binding/optitrack-binding-cp311-win_amd64.zip
+          if-no-files-found: error
+          retention-days: 7
