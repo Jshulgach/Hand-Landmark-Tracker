@@ -55,7 +55,10 @@ validates the saved calibration against the connected camera count, identities
 when available, and image sizes before enabling reconstruction.
 
 The optional OptiTrack path uses `optitrack_cam` and a separately obtained
-Windows Camera SDK. Set `OPTITRACK_CAM_PY_PATH` to a compatible binding folder.
+Windows Camera SDK. Source installations discover the local
+`external/optitrack-sdk-1.10/runtime` directory automatically. Set
+`OPTITRACK_CAM_PY_PATH` to use another compatible binding folder. See the
+[new-computer installation steps](installation.md#optitrack-on-a-new-windows-computer).
 The author reports historical successful Windows hardware tests. No current
 OptiTrack hardware retest was possible during this release work.
 

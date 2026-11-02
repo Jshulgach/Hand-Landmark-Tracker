@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Track the external setup guide, activation scripts and checksum-verified
+  OptiTrack runtime recovery utility; keep vendor files local. Discover the
+  checkout runtime automatically and expose original native import errors.
+
 - Use scalable point-sized controls across monitors, text zoom, an adaptive camera
   grid and display-only fit/fill choices in the OptiTrack tracking GUI.
 - Add a minimal scalable OptiTrack calibration preview with keyboard exposure,

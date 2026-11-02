@@ -60,4 +60,8 @@ calibration_data/
 /archive/
 
 # Local vendor SDK installations
-/external/
+/external/*
+!/external/README.md
+!/external/setup_optitrack.py
+!/external/Activate.cmd
+!/external/Activate.ps1

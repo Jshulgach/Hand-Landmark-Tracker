@@ -117,7 +117,10 @@ change when cameras are replugged: verify physical order or recalibrate.
 
 OptiTrack remains an optional Windows SDK integration. The author has historical
 Windows hardware tests; current release work has no OptiTrack hardware retest.
-Obtain the SDK separately and set `OPTITRACK_CAM_PY_PATH` to its binding folder.
+Install the official SDK/USB drivers separately. The tracked
+[external setup guide](external/README.md) provides verified local runtime recovery
+for Python 3.11 x64; source installations discover that runtime automatically.
+Use `OPTITRACK_CAM_PY_PATH` for another compatible binding.
 
 ## Development and release
 

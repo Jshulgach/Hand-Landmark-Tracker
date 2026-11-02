@@ -94,10 +94,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows.append(("optitrack:sdk", "ok" if sdk_available else "missing"))
             ok = ok and sdk_available
             if not sdk_available:
+                rows.append(("optitrack:import-error", getattr(cfg, "SDK_IMPORT_ERROR", "unknown")))
                 rows.append(
                     (
                         "hint:optitrack",
-                        "place SDK in optitrack_cam_py/Release or set OPTITRACK_CAM_PY_PATH",
+                        "source checkout: python external/setup_optitrack.py --from-history "
+                        "(Windows x64 / Python 3.11); or set OPTITRACK_CAM_PY_PATH to a compatible binding",
                     )
                 )
         except Exception as exc:

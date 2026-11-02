@@ -1,37 +1,14 @@
 import os
 from mavis_track.calibration import default_calibration_dir
-import sys
+from mavis_track._optitrack import load_sdk
 from pathlib import Path
 
 
 _SRC_ROOT = Path(__file__).resolve().parents[2]
 _CORE_OPTITRACK_DIR = _SRC_ROOT / "handtrack" / "cameras" / "optitrack"
 
-# Try to import compiled OptiTrack SDK module.
-# Search order:
-#   1) Existing PYTHONPATH / environment
-#   2) Environment variable OPTITRACK_CAM_PY_PATH
-#   3) Local ./Release folder next to this config file
-_sdk_extra_paths = []
-_env_sdk_path = os.environ.get("OPTITRACK_CAM_PY_PATH", "").strip()
-if _env_sdk_path:
-    _sdk_extra_paths.append(_env_sdk_path)
-
-_sdk_extra_paths.extend(
-    [
-        str(_CORE_OPTITRACK_DIR / "Release"),
-        os.path.join(os.path.dirname(__file__), "Release"),
-    ]
-)
-
-for _p in _sdk_extra_paths:
-    if _p and os.path.isdir(_p) and _p not in sys.path:
-        sys.path.insert(0, _p)
-
-try:
-    import optitrack_cam  # noqa: F401 - Exported for other modules to import
-except Exception:
-    optitrack_cam = None
+# The checkout runtime is local-only; explicit configuration takes priority.
+optitrack_cam, SDK_IMPORT_ERROR = load_sdk(_SRC_ROOT)
 
 # ==================== CAMERA SETTINGS ====================
 

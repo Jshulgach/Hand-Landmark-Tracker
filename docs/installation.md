@@ -83,3 +83,26 @@ as dependencies, so those remain installed even for camera tracking.
 Research datasets and trained weights are stored outside the checkout. See the
 [external-data guide](research-data.md) for `--data-dir`, `--video` and
 `MAVIS_DATA_DIR` configuration.
+
+## OptiTrack on a new Windows computer
+
+For the historical Flex 13 FS setup, install Camera SDK 1.10.3 with its USB
+drivers, use **Python 3.11 x64**, and install the current checkout rather than
+relying on the older published package. The SDK installer does not supply this
+project's Python binding. From a full Git clone with that environment active:
+
+```bat
+python -m pip install -e ".[gui,optitrack]"
+python external/setup_optitrack.py --from-history
+python -m mavis_track doctor --backend optitrack --gui
+python -m mavis_track gui --backend optitrack
+```
+
+The tracked `external/` setup files recover the two matching runtime files from
+existing Git history into a local, ignored folder. Checksums and the interpreter
+ABI are checked before use; a different existing runtime is preserved. Editable
+installations automatically discover that folder. USB drivers and vendor license
+review still use the official installer. Source ZIPs and shallow clones need a
+full clone or a copied matching runtime. See the
+[external setup guide](https://github.com/Jshulgach/Hand-Landmark-Tracker/tree/main/external)
+for recovery, copy and environment-variable commands.

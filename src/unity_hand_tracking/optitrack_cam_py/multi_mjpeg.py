@@ -35,6 +35,7 @@ try:
         DISPLAY_SCALE,
         GRID_COLS,
         MJPEG_MODE,
+        SDK_IMPORT_ERROR,
         optitrack_cam,
     )
 except ImportError:
@@ -43,6 +44,7 @@ except ImportError:
         DISPLAY_SCALE,
         GRID_COLS,
         MJPEG_MODE,
+        SDK_IMPORT_ERROR,
         optitrack_cam,
     )
 
@@ -149,10 +151,10 @@ class CameraManager:
         """Initialise the OptiTrack SDK and discover cameras."""
         if optitrack_cam is None:
             raise RuntimeError(
-                "optitrack_cam module not found. "
-                "Install/build the OptiTrack Python SDK and either place it in "
-                "unity_hand_tracking/optitrack_cam_py/Release or set "
-                "OPTITRACK_CAM_PY_PATH to its folder."
+                f"OptiTrack Python binding could not load ({SDK_IMPORT_ERROR}). "
+                "From a source checkout run: python external/setup_optitrack.py --from-history "
+                "(Windows x64 / Python 3.11), then restart MAVIS. "
+                "For another compatible binding, set OPTITRACK_CAM_PY_PATH to its folder."
             )
         print("Initializing OptiTrack SDK...")
         optitrack_cam.initialize_sdk()
