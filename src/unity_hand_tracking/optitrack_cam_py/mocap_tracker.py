@@ -929,6 +929,19 @@ class MultiCameraTracker:
         if self.cam_mgr:
             self.cam_mgr.set_exposure(cam_index, value)
 
+    def get_illumination(self, cam_index: int):
+        """Read the SDK-reported illumination capabilities and settings."""
+        if self.cam_mgr is None:
+            raise RuntimeError("Start cameras before reading illumination")
+        return self.cam_mgr.get_illumination(cam_index)
+
+    def set_illumination(self, cam_index: int, *, intensity=None, high_power=None, maximize=False):
+        """Change illumination within the camera/hub's supported limits."""
+        if self.cam_mgr is None:
+            raise RuntimeError("Start cameras before changing illumination")
+        return self.cam_mgr.set_illumination(cam_index, intensity=intensity,
+                                             high_power=high_power, maximize=maximize)
+
     def set_enabled_cameras(self, enabled: set[int] | None):
         """
         Set which cameras participate in triangulation.

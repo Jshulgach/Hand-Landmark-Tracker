@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add SDK-bounded IR intensity, high-power availability/readback and Max available
+  controls for individual/all OptiTrack cameras in tracking and calibration.
+- Add calibration I/K intensity, M maximum and H high-power shortcuts, with
+  settling after lighting changes and graceful handling of older bindings.
+- Add illumination binding API v2, isolated local build/install support and
+  compile-only Windows verification; no native artifact is uploaded.
+
 - Document the required OptiTrack USB driver step for a new Windows computer,
   including the operator-verified driver-only installer workflow, and distinguish
   successful runtime imports from actual camera discovery.

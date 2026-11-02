@@ -97,6 +97,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 binding_path = getattr(cfg.optitrack_cam, "__file__", None)
                 if binding_path:
                     rows.append(("optitrack:binding", str(binding_path)))
+                camera_type = getattr(cfg.optitrack_cam, "Camera", None)
+                lighting_api = all(callable(getattr(camera_type, name, None)) for name in (
+                    "get_intensity", "min_intensity", "max_intensity", "set_intensity",
+                    "is_high_power_supported", "is_high_power_available", "get_high_power", "set_high_power"))
+                rows.append(("optitrack:illumination",
+                             "binding ready; camera/hub capabilities checked on start" if lighting_api else
+                             "binding upgrade required for lighting controls; preview remains available"))
             if not sdk_available:
                 rows.append(("optitrack:import-error", getattr(cfg, "SDK_IMPORT_ERROR", "unknown")))
                 rows.append(

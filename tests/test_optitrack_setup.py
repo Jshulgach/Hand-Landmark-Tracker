@@ -181,3 +181,18 @@ def test_malformed_build_manifest_does_not_bypass_pinned_checks(tmp_path):
     target=tmp_path/'binding-build.json'
     target.write_text('[]')
     assert not setup.verified_local_binding(tmp_path,'optitrack_cam.cp311-win_amd64.pyd',b'changed')
+
+
+
+def test_doctor_reports_new_lighting_api_without_accessing_hardware(monkeypatch,capsys):
+    from handtrack.applications import _doctor
+    def no_hardware(*args):
+        raise AssertionError('Doctor must not initialize cameras or read physical settings')
+    names=('get_intensity','min_intensity','max_intensity','set_intensity',
+           'is_high_power_supported','is_high_power_available','get_high_power','set_high_power')
+    camera_type=type('Camera',(),{name:no_hardware for name in names})
+    cfg=SimpleNamespace(optitrack_cam=SimpleNamespace(Camera=camera_type,__file__='new-binding.pyd'))
+    monkeypatch.setattr(_doctor,'_check_import',lambda _:(True,'ok'))
+    monkeypatch.setattr(_doctor.importlib,'import_module',lambda _:cfg)
+    assert _doctor.main(['--backend','optitrack'])==0
+    assert 'binding ready; camera/hub capabilities checked on start' in capsys.readouterr().out

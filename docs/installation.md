@@ -123,3 +123,46 @@ A successful `optitrack:sdk : ok` verifies that the binding loads, not that USB
 drivers are installed or the cameras are detected. After setup, start the GUI
 and verify the expected camera count. An unset SDK environment variable is
 normal when the checkout runtime is found automatically.
+
+
+## Build the illumination-capable binding
+
+The default history-restored binding supports preview/exposure but lacks the
+illumination methods. The source branch provides a build/install helper for
+64-bit CPython 3.11, the pinned historical SDK and Visual Studio 2022 C++ build
+tools. Build tools belong on a build PC; they are not normal MAVIS dependencies.
+
+From the checkout, use an isolated environment so the tracking environment
+remains unchanged:
+
+```bat
+py -3.11 -m venv .cache/binding-env
+.cache/binding-env/Scripts/python.exe -m pip install pybind11==2.13.6 cmake==3.30.5
+.cache/binding-env/Scripts/python.exe external/setup_optitrack.py --from-history
+.cache/binding-env/Scripts/python.exe external/build_optitrack.py --restore-sdk --install
+```
+
+Close MAVIS and other processes that load its Python binding before installation.
+The helper verifies the historical SDK headers and import library, builds only
+the Python extension, and checks all illumination entrypoints in a separate
+process without initializing cameras. It then installs the extension beside the
+matching local DLL. The original binding is retained as a `.legacy-backup`.
+A local `binding-build.json` identifies the new extension's checksum; the vendor
+DLL remains pinned to its historical checksum. Repeating history recovery keeps
+a checksum-identified local v2 build instead of downgrading it.
+
+Restart MAVIS, then run:
+
+```bat
+python -m mavis_track doctor --backend optitrack --gui
+```
+
+`optitrack:illumination` should report that the binding is ready. Camera/hub
+availability is queried when capture starts. Native import verification does
+not establish real hardware lighting performance.
+
+The compile-check workflow builds/imports on Windows without uploading binary
+artifacts. No prebuilt illumination binding is distributed by this source
+branch. The helper's optional `--bundle` flag creates a local ZIP containing the
+extension, build manifest and license notices; it excludes all SDK DLLs, headers
+and import libraries and never uploads that ZIP.

@@ -28,6 +28,8 @@ except Exception as _mp_exc:
 
 import cv2
 import numpy as np
+from handtrack.applications._illumination_qt import IlluminationPanel
+
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QImage, QPalette, QPixmap
 from PyQt5.QtWidgets import (
@@ -528,6 +530,8 @@ class StereoHandTrackerGUI(QMainWindow):
         apply_all_row.addWidget(apply_all_btn)
         camera_layout.addLayout(apply_all_row)
         layout.addWidget(camera_group)
+        self.illumination_panel = IlluminationPanel()
+        layout.addWidget(self.illumination_panel)
         # ---- Processing Options ----
         processing_group = QGroupBox("Processing")
         processing_layout = QVBoxLayout(processing_group)
@@ -1180,6 +1184,7 @@ class StereoHandTrackerGUI(QMainWindow):
                 self.status_label.setText("Status: Camera init failed")
                 return
             self.num_cameras = self.tracker.num_cameras
+            self.illumination_panel.bind_manager(self.tracker.cam_mgr)
             self.camera_info_label.setText(
                 f"Cameras: {self.num_cameras}\nIDs: {list(range(self.num_cameras))}"
             )
@@ -1263,6 +1268,7 @@ class StereoHandTrackerGUI(QMainWindow):
             # Start GUI refresh timer (~60 Hz display rate)
             self.timer.start(16)
         except Exception as e:
+            self.illumination_panel.bind_manager(None)
             if self.tracker is not None:
                 try:
                     self.tracker.cleanup()
@@ -1276,6 +1282,7 @@ class StereoHandTrackerGUI(QMainWindow):
     def stop_tracking(self):
         """Stop tracking."""
         self.timer.stop()
+        self.illumination_panel.bind_manager(None)
         # Stop the processing thread first
         if self._proc_thread is not None:
             self._proc_thread.stop()

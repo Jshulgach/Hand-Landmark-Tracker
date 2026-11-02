@@ -84,7 +84,10 @@ text and a text zoom control. Its compact footer lists these keyboard commands:
 | Up / Down | Increase / decrease exposure by 1 |
 | Shift + Up / Down | Increase / decrease exposure by 10 |
 | 0–9 | Select the matching logical camera index |
-| A | Apply exposure changes to all cameras |
+| A | Target all cameras for exposure and illumination |
+| I / K | Increase / decrease IR intensity by 1, within each camera's limits |
+| M | Maximum available intensity and supported/available high-power mode |
+| H | Toggle high power on capable selected cameras |
 | Space | Pause / resume automatic board capture |
 | Q | Finish capture and attempt calibration with sufficient observations |
 | Esc or close | Cancel without replacing the saved calibration |
@@ -97,3 +100,34 @@ Shift+W/S for exposure and displays those keys in its footer.
 
 For the estimator accuracy audit and equal-priority hand/whole-body roadmap, see
 [the MMPose comparison](mmpose-comparison.md).
+
+
+## IR illumination
+
+Tracking and OptiTrack calibration include an **IR illumination** panel. Select
+**All cameras** or a camera index, enter an SDK intensity and choose **Apply IR**.
+**High power** requests the supported camera/hub mode; **Max available** sets
+each targeted camera to its reported maximum intensity and enables high power
+only where supported and available. Starting preview does not change lighting.
+
+The readback lists each camera's intensity, SDK limits and high-power state.
+Unavailable controls are disabled. Mixed hardware is handled per camera:
+unsupported targets are skipped with a reason; changes to other cameras remain
+visible. For manual all-camera levels, the input range is the intersection of
+supported ranges; Max available can use each camera's different maximum.
+
+Flex 3 high-power operation requires a compatible powered OptiHub2. The SDK's
+supported/available flags determine which controls can be used. See
+[OptiTrack's high-power documentation](https://docs.optitrack.com/v3.2/motive/calibration/.mcal-xml-calibration-files#highpower).
+
+Intensity and high-power output are separate from exposure, gain and the status
+indicator LEDs. SDK readback reports settings, not measured optical power.
+Continuous IR and camera frame rate are not changed by these controls.
+Calibration pauses capture briefly after lighting changes, including partial
+failures; image batches acquired before the change are discarded.
+
+These controls require binding API v2. The historical binding restored by
+`setup_optitrack.py --from-history` has no illumination methods: preview remains
+available, and the panel explains that a binding upgrade is required. `doctor`
+reports this separately under `optitrack:illumination`. See the
+[binding build instructions](installation.md#build-the-illumination-capable-binding).

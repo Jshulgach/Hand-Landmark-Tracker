@@ -1,11 +1,14 @@
 """Exposure and capture controls independent of the calibration solver."""
 import time
 
+from ._illumination_controls import IlluminationControls
+
 
 class CalibrationControls:
     """SDK exposure values use the same 1..480 range as the OptiTrack GUI."""
     instructions = (
         'Up/Down: exposure   Shift: step 10   0-9: select camera   A: all cameras',
+        'I/K: IR intensity   M: max available light   H: high power',
         'Space: pause/resume auto-capture   Q: finish capture   Esc: cancel',
     )
 
@@ -18,6 +21,7 @@ class CalibrationControls:
         self.cancelled = False
         self.last_change = float('-inf')
         self.last_error = ''
+        self.lighting = IlluminationControls(manager, self._lighting_changed)
 
     @property
     def quit_requested(self):
@@ -31,6 +35,8 @@ class CalibrationControls:
         if key in ('up', 'down'):
             step = 10 if shift else 1
             self.adjust(step if key == 'up' else -step)
+        elif key in ('i','k','m','h'):
+            self.adjust_lighting(key)
         elif key == 'a':
             self.selected = None
         elif len(key) == 1 and key.isdigit():
@@ -47,6 +53,22 @@ class CalibrationControls:
         else:
             return False
         return True
+
+    def _lighting_changed(self):
+        self.last_change = time.monotonic()
+
+    def adjust_lighting(self, key):
+        targets = list(range(len(self.exposures))) if self.selected is None else [self.selected]
+        if key in ('i','k'):
+            self.lighting.apply(targets,delta=1 if key=='i' else -1)
+        elif key == 'm':
+            self.lighting.apply(targets,maximize=True)
+        else:
+            capable = [self.lighting.read(i) for i in targets]
+            capable = [s for s in capable if s.high_power_supported and (s.high_power_available or s.high_power)]
+            enabled = not (capable and all(s.high_power for s in capable))
+            self.lighting.apply(targets,high_power=bool(enabled))
+        self.last_error = '; '.join(self.lighting.errors)
 
     def adjust(self, delta):
         targets = range(len(self.exposures)) if self.selected is None else [self.selected]
@@ -89,7 +111,7 @@ class _OpenCVPreview:
         self.controls, self.title = controls, title
         self.instructions = (
             'W/S: exposure   Shift+W/S: step 10   0-9: camera   A: all cameras',
-            controls.instructions[1],
+            *controls.instructions[1:],
         )
         cv2.namedWindow(title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
         cv2.resizeWindow(title, 1100, 800)
@@ -105,10 +127,11 @@ class _OpenCVPreview:
         while len(tiles) % cols:
             tiles.append(np.zeros_like(tiles[0]))
         grid = np.vstack([np.hstack(tiles[i:i+cols]) for i in range(0,len(tiles),cols)])
-        grid = cv2.copyMakeBorder(grid, 100, 110, 0, 0, cv2.BORDER_CONSTANT)
-        lines = [(status,35), (self.controls.description(),75),
-                 (self.instructions[0],grid.shape[0]-65),
-                 (self.instructions[1],grid.shape[0]-25)]
+        footer = len(self.instructions)*36+15
+        grid = cv2.copyMakeBorder(grid, 100, footer, 0, 0, cv2.BORDER_CONSTANT)
+        lines = [(status,35), (self.controls.last_error or self.controls.description(),75)]
+        lines.extend((text,grid.shape[0]-footer+30+index*36)
+                     for index,text in enumerate(self.instructions))
         for text, y in lines:
             cv2.putText(grid,text,(14,y),cv2.FONT_HERSHEY_SIMPLEX,.7,(240,240,240),2)
         cv2.imshow(self.title,grid)

@@ -136,6 +136,10 @@ def main(argv=None):
             archive.write(repo/'LICENSE','LICENSE')
             archive.write(repo/'THIRD_PARTY_NOTICES.md','THIRD_PARTY_NOTICES.md')
             archive.write(licenses[0],'PYBIND11_LICENSE.txt')
+        with zipfile.ZipFile(bundle) as archive:
+            print('Bundle contents:', ', '.join(archive.namelist()))
+            assert not any(name.endswith(('.dll','.h','.lib')) for name in archive.namelist())
+        print('Local bundle bytes:',bundle.stat().st_size)
         print('Local bundle:',bundle)
         print('Bundle SHA256:',hashlib.sha256(bundle.read_bytes()).hexdigest())
     print('Binding SHA256:',manifest['binding_sha256'])

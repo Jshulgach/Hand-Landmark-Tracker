@@ -33,3 +33,13 @@ not covered by MAVIS's MIT license. Local SDK files are preserved for developmen
 - [OptiTrack EULAs](https://optitrack.com/about/legal/eula)
 
 MAVIS is independent of, and is not endorsed by, Google, Riverbank, or OptiTrack.
+
+
+## Optional native binding build
+
+The optional OptiTrack Python binding is built using pybind11 2.13.6 under its
+BSD 3-Clause license. A locally generated binding ZIP includes pybind11's license
+alongside the MAVIS license and these notices. The local bundle excludes all
+vendor SDK DLLs, headers and import libraries. OptiTrack's separate terms still
+apply to SDK use. No compiled illumination binding is shipped in the MAVIS
+wheel, source distribution or curated example downloads.

@@ -249,6 +249,20 @@ class CameraManager:
         if 0 <= cam_index < len(self.workers):
             self.workers[cam_index].set_exposure(value)
 
+    def _illumination_camera(self, cam_index):
+        if type(cam_index) is not int or not 0 <= cam_index < len(self.workers):
+            raise ValueError("Camera index is outside the active capture session")
+        return self.workers[cam_index].camera
+
+    def get_illumination(self, cam_index):
+        from mavis_track._illumination import read_illumination
+        return read_illumination(self._illumination_camera(cam_index))
+
+    def set_illumination(self, cam_index, *, intensity=None, high_power=None, maximize=False):
+        from mavis_track._illumination import set_illumination
+        return set_illumination(self._illumination_camera(cam_index), intensity=intensity,
+                                high_power=high_power, maximize=maximize)
+
     def get_frame(self, cam_index: int):
         """Return the latest BGR frame from a specific camera."""
         return self.workers[cam_index].get_frame()

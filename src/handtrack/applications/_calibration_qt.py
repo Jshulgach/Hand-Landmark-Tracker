@@ -4,6 +4,7 @@ import cv2
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QImage, QPixmap
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QVBoxLayout, QHBoxLayout, QSpinBox
+from ._illumination_qt import IlluminationPanel
 from ._display import CameraGrid, ImagePreview, configure_high_dpi, fit_window_to_screen, apply_text_font
 
 
@@ -45,6 +46,9 @@ class CalibrationPreview(QMainWindow):
         self.exposure_status = QLabel()
         self.exposure_status.setWordWrap(True)
         layout.addWidget(self.exposure_status)
+        self.illumination = IlluminationPanel(controls.lighting, keyboard_focus=False)
+        self.illumination.target.currentIndexChanged.connect(self._lighting_target_changed)
+        layout.addWidget(self.illumination)
         self.camera_grid = CameraGrid()
         grid = self.camera_grid.reset(len(controls.exposures))
         self.labels = []
@@ -89,9 +93,16 @@ class CalibrationPreview(QMainWindow):
         key = keys.get(event.key(),event.text().lower())
         if key and self.controls.handle_key(key,bool(event.modifiers() & Qt.ShiftModifier)):
             self._update_exposure_text()
+            self.illumination.set_target(self.controls.selected)
+            if key in ('i','k','m','h'):
+                self.illumination.refresh()
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _lighting_target_changed(self):
+        self.controls.selected = self.illumination.target.currentData()
+        self._update_exposure_text()
 
     def _update_exposure_text(self):
         self.exposure_status.setText(self.controls.last_error or self.controls.description())

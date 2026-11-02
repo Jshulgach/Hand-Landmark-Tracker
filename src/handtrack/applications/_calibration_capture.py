@@ -18,7 +18,7 @@ def run_capture(module):
         image_size = manager.get_resolution(0)
         preview = create_calibration_preview(manager,'OptiTrack ChArUco Calibration',10)
         controls = preview.controls
-        print('Calibration: Up/Down exposure, Shift step 10, 0-9 camera, A all, Space pause, Q finish, Esc cancel.')
+        print('Calibration: Up/Down exposure, Shift step 10, I/K IR, M max light, H high power, 0-9 camera, A all, Space pause, Q finish, Esc cancel.')
         print(f'Board: {module.CHARUCO_SQUARES_X}x{module.CHARUCO_SQUARES_Y}; target: {module.NUM_CALIBRATION_IMAGES} captures.')
         detected = None
         with concurrent.futures.ThreadPoolExecutor(max_workers=count) as executor:

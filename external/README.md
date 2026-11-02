@@ -109,3 +109,24 @@ detected zero connected cameras. Completing the USB driver stage of the official
 OptiTrack installer resolved discovery; the remaining SDK installation was
 cancelled afterward. This confirms that a successful Python/native-library
 import is not a USB driver or camera-detection check.
+
+
+## Illumination binding upgrade
+
+History recovery provides the original exposure/preview binding. Lighting
+controls need the new API v2 extension. `build_optitrack.py --restore-sdk --install`
+builds and installs it locally using Visual Studio 2022 C++ tools, CMake 3.30.5
+and pybind11 2.13.6 in Python 3.11 x64. Use a separate environment under `.cache/`
+for build dependencies, as shown in the main installation guide.
+
+The build helper verifies the pinned 187 headers and one import library from Git
+history, compiles the project wrapper and tests native imports without SDK
+initialization or camera access. It preserves the original binding as a backup
+and records the installed build hash. Runtime recovery will not downgrade an
+identified local v2 build. The CameraLibrary DLL is still checked against the
+original pinned hash.
+
+The source includes no prebuilt lighting extension. The Windows compile-check
+workflow exports no native artifacts. Optional local bundle contents are the
+extension, manifest, MAVIS license/third-party notices and pybind11 license.
+Vendor DLLs, headers and import libraries are excluded.
