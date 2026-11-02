@@ -1,3 +1,8 @@
+from mavis_track.research import research_example_args
+
+if __name__ == "__main__":
+    _args = research_example_args("Extract smoothing training sequences", collection="smoothing", video=True)
+
 import os
 import cv2
 from tqdm import tqdm
@@ -113,10 +118,10 @@ def save_dataset(X, Y, save_dir):
 if __name__ == "__main__":
 
     # ---------- CONFIG ----------
-    VIDEO_PATH = r"G:\Shared drives\NML_shared\DataShare\HDEMG Human Healthy\Open_Ephys\Jonathan\2025_05_07\media\HandDynamic.mp4"
+    VIDEO_PATH = _args.video
     SEQUENCE_LENGTH = 10  # Length of each sequence
     STEP_SIZE = 1  # Step size for creating sequences
-    SAVE_DIR = "data"  # Directory to save the dataset
+    SAVE_DIR = _args.data_dir  # External dataset directory
 
     print("Extracting landmarks...")
     raw = extract_landmarks(VIDEO_PATH, visualize=False)

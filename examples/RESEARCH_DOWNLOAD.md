@@ -18,7 +18,13 @@ python -m pip install "mavis-track[ml,io,stream]"
 
 Review the README and example configuration inside each directory before
 running a script. Replace placeholder dataset paths with paths on your machine.
-Scripts that need a source recording accept the `HANDTRACK_VIDEO_PATH`
-environment variable and otherwise look for `data/HandDynamic.mp4`.
+The updated EMG/RNN scripts accept `--data-dir` and use
+`~/Documents/Hand-Landmark-Tracker-Research/data/` by default. Set `MAVIS_DATA_DIR`
+for a shared custom root. Smoothing data defaults to its `smoothing/` subfolder;
+an explicit `--data-dir` selects that example's dataset folder directly.
+Video examples accept `--video` or `HANDTRACK_VIDEO_PATH` and otherwise look for
+`HandDynamic.mp4` in their selected data folder. Existing session-based scripts
+keep their `--root_dir` arguments. Path help runs without the optional ML stack.
+Use an installation of the updated source checkout for these new path options.
 No participant data, recordings, trained models, OptiTrack SDK files, or other
 vendor binaries are included in this download.

@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- Use scalable point-sized controls across monitors, text zoom, an adaptive camera
+  grid and display-only fit/fill choices in the OptiTrack tracking GUI.
+- Add a minimal scalable OptiTrack calibration preview with keyboard exposure,
+  per-camera/all-camera targeting, pause, finish and safe cancellation.
+- Document an estimator audit and equal-priority hand/whole-body accuracy roadmap.
+
+- Keep OptiTrack preview and 2D hand overlays running when calibration is missing
+  or rejected; show calibration status and gate 3D views, controls, and outputs
+  until a valid calibration is loaded on tracking start.
+
+- Fit the OptiTrack GUI to the available screen area, with resizable camera/3D
+  previews and a scrollable control panel for smaller and scaled displays.
+
+- Bound recording memory with incremental numeric chunks, recoverable checkpoints,
+  streaming replay/export, and a public `iter_session_chunks` analysis API.
+- Move live preview capture, inference and mode switches off the Qt thread, with
+  bounded latest-frame delivery and asynchronous stop/close cleanup.
+- Consolidate historical Flex reports under `research/camera-placement`, preserve
+  unused local scripts in the archive, and untrack native build caches/artifacts.
+
+- Add the caller-owned-frame `HandBodyTracker` API for single-person synchronized
+  hand/body observations, explicit coordinate spaces, read-only arrays, and
+  per-region tracking-quality flags.
+- Add `record --mode hand-body`, numeric session schema 2 with shared frame
+  timestamps, body visibility, and quality metadata; extend load/replay/export.
+  Existing hand-only API and schema 0/1 readers remain supported.
+
+
 All notable changes to this project will be documented in this file.
 
 ## mavis-track 0.1.0 - 2026-10-04

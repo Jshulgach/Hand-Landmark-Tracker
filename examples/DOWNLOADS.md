@@ -1,6 +1,6 @@
 # MAVIS core examples
 
-This first-release bundle contains `mavis_webcam.py`, licenses, and the legacy
+This first-release bundle contains `mavis_webcam.py`, `mavis_hand_body.py`, licenses, and the legacy
 Unity CSV bone-rotation listeners. SDK assets and recorded data are excluded.
 
 Install `mavis-track` from PyPI with Python 3.10–3.12 and run

@@ -57,6 +57,7 @@ def test_legacy_detector_start_failure_releases_capture(monkeypatch):
 
 def test_gui_failed_camera_can_retry_and_releases_on_tracking_error(monkeypatch):
     from handtrack.applications import mediapipe_gui as module
+    from handtrack.applications import _preview_worker as worker_module
     from PyQt5.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     closed = []
@@ -73,21 +74,34 @@ def test_gui_failed_camera_can_retry_and_releases_on_tracking_error(monkeypatch)
             self.opened, self.released = opened, False
         def isOpened(self):
             return self.opened
+        def set(self, *_):
+            pass
+        def get(self, *_):
+            return 30
         def read(self):
             return True, np.zeros((8, 8, 3), np.uint8)
         def release(self):
             self.released = True
     first, second = Capture(False), Capture(True)
     captures = iter((first, second))
-    monkeypatch.setattr(module, 'MediaPipeModeTracker', Tracker)
-    monkeypatch.setattr(module.cv2, 'VideoCapture', lambda *_: next(captures))
+    monkeypatch.setattr(worker_module, 'MediaPipeModeTracker', Tracker)
+    monkeypatch.setattr(worker_module.cv2, 'VideoCapture', lambda *_: next(captures))
     window = module.MediaPipeTrackerGUI()
-    assert first.released and window.capture is None
-    window._start()
-    assert window.timer.isActive()
-    window._update_frame()
-    assert second.released and not window.timer.isActive()
-    assert 'processing failed' in window.preview.text()
-    window.close()
-    app.processEvents()
-    assert closed == [True]
+    def await_cleanup():
+        deadline = time.monotonic() + 3
+        while window.worker is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(.002)
+        assert window.worker is None
+    try:
+        await_cleanup()
+        assert first.released
+        window._start()
+        await_cleanup()
+        assert second.released and not window.timer.isActive()
+        assert 'processing failed' in window.preview.text()
+        assert closed == [True]
+    finally:
+        window.close()
+        await_cleanup()
+        app.processEvents()

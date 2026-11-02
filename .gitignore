@@ -44,3 +44,20 @@ src/unity_hand_tracking/optitrack_cam_py/Release/
 calibration_data/
 *.npz
 *.csv
+
+# Generated native build trees and local experiment outputs
+**/CMakeFiles/
+**/CMakeCache.txt
+**/build-cp*/
+**/build-vs*/
+/recordings/
+/outputs/
+/placement_report/
+/data/
+/Flex_*_Placement_Evaluation*/
+
+# Local historical material is preserved outside the checkout.
+/archive/
+
+# Local vendor SDK installations
+/external/

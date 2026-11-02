@@ -60,11 +60,7 @@ class MultiCameraTracker:
         self._mp_hands_cls = None
 
         # Calibration data
-        self.camera_matrices = []
-        self.dist_coeffs = []
-        self.R_matrices = []
-        self.T_vectors = []
-        self.projection_matrices = []
+        self._clear_calibration()
 
         # Set of camera indices used for triangulation (all enabled by default)
         self._enabled_cameras: set[int] | None = None  # None = all enabled
@@ -86,8 +82,19 @@ class MultiCameraTracker:
     # ------------------------------------------------------------------ #
     # Calibration
     # ------------------------------------------------------------------ #
+    def _clear_calibration(self):
+        self.calibration_available = False
+        self.calibration_identity_verified = False
+        self.calibration_error = None
+        self.camera_matrices = []
+        self.dist_coeffs = []
+        self.R_matrices = []
+        self.T_vectors = []
+        self.projection_matrices = []
+
     def load_calibration(self):
-        """Load validated camera matrices, resolving source identity and sizes."""
+        """Load strictly validated calibration; discard prior geometry on failure."""
+        self._clear_calibration()
         from mavis_track.calibration import load_camera_calibration
         sizes = None
         if self.cam_mgr is not None and hasattr(self.cam_mgr, "get_resolution"):
@@ -104,6 +111,7 @@ class MultiCameraTracker:
         self.R_matrices, self.T_vectors = Rs, Ts
         self.calibration_identity_verified = verified
         self._compute_projection_matrices()
+        self.calibration_available = True
 
     def _compute_projection_matrices(self):
         """P = K @ [R | T] for each camera."""
@@ -183,15 +191,16 @@ class MultiCameraTracker:
         self.img_width = w
         self.img_height = h
 
-        # --- calibration ---
-        self.load_calibration()
-
-        # Sanity check: calibration camera count must match hardware
-        if len(self.camera_matrices) != self.num_cameras:
-            print(
-                f"⚠ Calibration has {len(self.camera_matrices)} cameras "
-                f"but {self.num_cameras} are connected."
-            )
+        # Camera preview and per-view 2D detection do not require calibration.
+        # Keep the strict loader for callers that explicitly request geometry.
+        try:
+            self.load_calibration()
+        except (OSError, ValueError) as exc:
+            self._clear_calibration()
+            self.calibration_error = str(exc)
+            print(f"[Calibration] Live preview / 2D only: {exc}")
+            print("[Calibration] Stop preview, run 'mavis-track calibrate --backend optitrack', "
+                  "then start tracking again to enable 3D.")
 
         # --- MediaPipe (one instance per camera for thread safety) ---
         self.hands_detectors = []
@@ -210,7 +219,7 @@ class MultiCameraTracker:
             thread_name_prefix="mp_detect",
         )
 
-        print(f"✓ {self.num_cameras} cameras initialised with threaded MediaPipe")
+        print(f"{self.num_cameras} cameras initialised with threaded MediaPipe")
         return True
 
     def update_mp_params(self, min_det_conf, min_track_conf):
@@ -878,23 +887,23 @@ class MultiCameraTracker:
         frames = self.capture_frames()
         all_results = self.detect_hands_all_cameras(frames)
 
-        t0 = time.perf_counter()
-        all_landmarks_2d = self.extract_landmarks_2d(all_results)
-        matched_groups = self.match_hands_across_cameras(all_landmarks_2d)
-
         triangulated_hands = []
         valid_2d_landmarks = {cam_idx: {} for cam_idx in range(self.num_cameras)}
+        self._triangulation_ms = 0.0
+        if self.calibration_available:
+            t0 = time.perf_counter()
+            all_landmarks_2d = self.extract_landmarks_2d(all_results)
+            matched_groups = self.match_hands_across_cameras(all_landmarks_2d)
 
-        for group in matched_groups:
-            lm3d, best_cams, valid_lms, reproj_errs, n_cams = self.triangulate_hand(
-                all_landmarks_2d, group
-            )
-            triangulated_hands.append((lm3d, best_cams, valid_lms, reproj_errs, n_cams))
+            for group in matched_groups:
+                lm3d, best_cams, valid_lms, reproj_errs, n_cams = self.triangulate_hand(
+                    all_landmarks_2d, group
+                )
+                triangulated_hands.append((lm3d, best_cams, valid_lms, reproj_errs, n_cams))
+                for cam_idx, hand_idx_in_cam in group.items():
+                    valid_2d_landmarks[cam_idx][hand_idx_in_cam] = valid_lms[cam_idx]
 
-            for cam_idx, hand_idx_in_cam in group.items():
-                valid_2d_landmarks[cam_idx][hand_idx_in_cam] = valid_lms[cam_idx]
-
-        self._triangulation_ms = (time.perf_counter() - t0) * 1000
+            self._triangulation_ms = (time.perf_counter() - t0) * 1000
 
         # FPS
         now = time.perf_counter()
@@ -947,4 +956,5 @@ class MultiCameraTracker:
             self.cam_mgr.stop_all()
             self.cam_mgr = None
 
+        self._clear_calibration()
         print("Multi-camera tracker cleanup complete.")

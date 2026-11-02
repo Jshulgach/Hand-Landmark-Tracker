@@ -43,7 +43,9 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Integration: integration.md
+  - Research data: research-data.md
   - CLI: cli.md
   - Backends: backends.md
+  - Model roadmap: mmpose-comparison.md
   - Troubleshooting: troubleshooting.md
   - Releases: releases.md

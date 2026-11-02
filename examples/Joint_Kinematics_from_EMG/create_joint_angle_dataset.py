@@ -1,95 +1,106 @@
-from tqdm import tqdm
-import numpy as np
-from scipy.interpolate import interp1d
-from handtrack.processing import notch_filter, bandpass_filter, lowpass_filter, rectify, extract_features, compute_finger_angles
+"""External-data research example: create_joint_angle_dataset.py. Paths are independent of the working directory."""
+from mavis_track.research import research_example_args
 
 
-def apply_filters(emg, fs=5000):
-    emg = notch_filter(emg, fs, 60)
-    emg = bandpass_filter(emg, 20, 450, fs)
-    emg = rectify(emg)
-    return lowpass_filter(emg, 5, fs)
+def main(argv=None):
+    args = research_example_args('External-data research example: create_joint_angle_dataset.py', argv)
+    DATA_DIR = args.data_dir
+    from tqdm import tqdm
+    import numpy as np
+    from scipy.interpolate import interp1d
+    from handtrack.processing import notch_filter, bandpass_filter, lowpass_filter, rectify, extract_features, compute_finger_angles
 
 
-# ---------- CONFIG ----------
-EMG_FILE = '../../data/emg_data.npz'
-LANDMARKS_FILE = '../../data/HandDynamic_smoothed_landmarks.npz'
-SYNC_FILE = '../../data/sync_offset.txt'
+    def apply_filters(emg, fs=5000):
+        emg = notch_filter(emg, fs, 60)
+        emg = bandpass_filter(emg, 20, 450, fs)
+        emg = rectify(emg)
+        return lowpass_filter(emg, 5, fs)
 
-WINDOW_MS = 50  # Window size in milliseconds
-STEP_MS = 10    # Step size in milliseconds
 
-# ---------- LOAD DATA ----------
-result = np.load(EMG_FILE)
-print(f"EMG data loaded with contents: {list(result.keys())}, shape: {result['emg_data'].shape}")
+    # ---------- CONFIG ----------
+    EMG_FILE = DATA_DIR / 'emg_data.npz'
+    LANDMARKS_FILE = DATA_DIR / 'HandDynamic_smoothed_landmarks.npz'
+    SYNC_FILE = DATA_DIR / 'sync_offset.txt'
 
-landmarks_data = np.load(LANDMARKS_FILE)
-print(f"Landmark file contents: {list(landmarks_data.keys())}, shape: {landmarks_data['landmarks'].shape}")
+    WINDOW_MS = 50  # Window size in milliseconds
+    STEP_MS = 10    # Step size in milliseconds
 
-with open(SYNC_FILE, 'r') as f:
-    sync_offset = float(f.readlines()[0].split(': ')[1].strip().split(' ')[0])
-print(f"Sync offset loaded: {sync_offset:.3f} seconds")
+    # ---------- LOAD DATA ----------
+    result = np.load(EMG_FILE)
+    print(f"EMG data loaded with contents: {list(result.keys())}, shape: {result['emg_data'].shape}")
 
-# ---------- EXTRACT LANDMARKS AND TIME VECTORS ----------
-lm = landmarks_data['landmarks']
-lm_fs = int(landmarks_data['sampling_rate'])
-lm_t = np.arange(lm.shape[0]) / lm_fs
-lm_t += sync_offset
+    landmarks_data = np.load(LANDMARKS_FILE)
+    print(f"Landmark file contents: {list(landmarks_data.keys())}, shape: {landmarks_data['landmarks'].shape}")
 
-emg = result['emg_data']
-emg_fs = int(result['sampling_rate'])
-emg_t = result['time_vector']
+    with open(SYNC_FILE, 'r') as f:
+        sync_offset = float(f.readlines()[0].split(': ')[1].strip().split(' ')[0])
+    print(f"Sync offset loaded: {sync_offset:.3f} seconds")
 
-print(f"Time vector shapes — Video: {lm_t.shape}, EMG: {emg_t.shape}")
+    # ---------- EXTRACT LANDMARKS AND TIME VECTORS ----------
+    lm = landmarks_data['landmarks']
+    lm_fs = int(landmarks_data['sampling_rate'])
+    lm_t = np.arange(lm.shape[0]) / lm_fs
+    lm_t += sync_offset
 
-# ---------- INTERPOLATE LANDMARKS ----------
-lm_interp = np.zeros((emg.shape[1], lm.shape[1], lm.shape[2]))
-for joint_idx in range(lm.shape[1]):
-    for dim in range(lm.shape[2]):
-        f = interp1d(lm_t, lm[:, joint_idx, dim], kind='linear', fill_value='extrapolate')
-        lm_interp[:, joint_idx, dim] = f(emg_t)
+    emg = result['emg_data']
+    emg_fs = int(result['sampling_rate'])
+    emg_t = result['time_vector']
 
-print("Interpolated landmarks shape:", lm_interp.shape)
+    print(f"Time vector shapes — Video: {lm_t.shape}, EMG: {emg_t.shape}")
 
-# ---------- FILTER EMG ----------
-print(f"Filtering EMG data: {emg.shape}")
-emg_processed = apply_filters(emg, emg_fs)
-print(f"Filtered EMG shape: {emg_processed.shape}")
+    # ---------- INTERPOLATE LANDMARKS ----------
+    lm_interp = np.zeros((emg.shape[1], lm.shape[1], lm.shape[2]))
+    for joint_idx in range(lm.shape[1]):
+        for dim in range(lm.shape[2]):
+            f = interp1d(lm_t, lm[:, joint_idx, dim], kind='linear', fill_value='extrapolate')
+            lm_interp[:, joint_idx, dim] = f(emg_t)
 
-# ---------- EXTRACT FEATURES ----------
-window_size = int(WINDOW_MS * emg_fs / 1000)
-step_size = int(STEP_MS * emg_fs / 1000)
-print(f"Window size: {window_size} samples, Step size: {step_size} samples")
+    print("Interpolated landmarks shape:", lm_interp.shape)
 
-n_windows = (emg.shape[1] - window_size) // step_size + 1
-emg_features = []
-joint_angle_labels = []
+    # ---------- FILTER EMG ----------
+    print(f"Filtering EMG data: {emg.shape}")
+    emg_processed = apply_filters(emg, emg_fs)
+    print(f"Filtered EMG shape: {emg_processed.shape}")
 
-print("Extracting features and computing joint angles...")
-for start in tqdm(range(0, emg.shape[1] - window_size + 1, step_size)):
-    end = start + window_size
-    emg_window = emg_processed[:, start:end]
-    features = extract_features(emg_window)
-    emg_features.append(features)
+    # ---------- EXTRACT FEATURES ----------
+    window_size = int(WINDOW_MS * emg_fs / 1000)
+    step_size = int(STEP_MS * emg_fs / 1000)
+    print(f"Window size: {window_size} samples, Step size: {step_size} samples")
 
-    # Average landmarks in this window
-    lm_window = lm_interp[start:end, :, :]
-    avg_lm = np.mean(lm_window, axis=0)  # shape: (21, 3)
+    n_windows = (emg.shape[1] - window_size) // step_size + 1
+    emg_features = []
+    joint_angle_labels = []
 
-    # Convert avg_lm to joint angles
-    angles = compute_finger_angles(avg_lm)
-    joint_angle_labels.append(angles)
+    print("Extracting features and computing joint angles...")
+    for start in tqdm(range(0, emg.shape[1] - window_size + 1, step_size)):
+        end = start + window_size
+        emg_window = emg_processed[:, start:end]
+        features = extract_features(emg_window)
+        emg_features.append(features)
 
-# ---------- CONVERT TO NP ARRAYS ----------
-emg_features = np.array(emg_features)
-joint_angle_labels = np.array(joint_angle_labels)
+        # Average landmarks in this window
+        lm_window = lm_interp[start:end, :, :]
+        avg_lm = np.mean(lm_window, axis=0)  # shape: (21, 3)
 
-print("Feature shape:", emg_features.shape)
-print("Joint angle label shape:", joint_angle_labels.shape)
+        # Convert avg_lm to joint angles
+        angles = compute_finger_angles(avg_lm)
+        joint_angle_labels.append(angles)
 
-# ---------- SAVE ----------
-np.savez('../../data/hand_dynamic_joint_angle_dataset.npz',
-         emg_features=emg_features,
-         joint_angles=joint_angle_labels)
+    # ---------- CONVERT TO NP ARRAYS ----------
+    emg_features = np.array(emg_features)
+    joint_angle_labels = np.array(joint_angle_labels)
 
-print("Saved dataset with EMG features and joint angles.")
+    print("Feature shape:", emg_features.shape)
+    print("Joint angle label shape:", joint_angle_labels.shape)
+
+    # ---------- SAVE ----------
+    np.savez(DATA_DIR / 'hand_dynamic_joint_angle_dataset.npz',
+             emg_features=emg_features,
+             joint_angles=joint_angle_labels)
+
+    print("Saved dataset with EMG features and joint angles.")
+
+
+if __name__ == "__main__":
+    main()

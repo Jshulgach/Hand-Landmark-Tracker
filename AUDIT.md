@@ -261,3 +261,102 @@ package. Test evidence is retained under `%TEMP%/handtrack-audit-20261004` and
 The software assessment is complete with the findings above recorded. A release should close the findings applicable to its advertised scope and obtain the native desktop checks in the platform table. Current uncertainty is explicit: native Mac/Linux camera and visible display behavior, physical unplug/replug, synchronized physical multi-camera accuracy, positive face/pose tracking, external Unity/LSL receiver integration, and a current OptiTrack retest were not established.
 
 Windows probe results and distributions are retained under `%TEMP%/handtrack-audit-20261004`; Linux installation and probe logs are under `/tmp/handtrack-audit-20261004-linux*`. These are temporary audit evidence, not package dependencies. Implementation now includes the source, regression tests, documentation, packaging, and workflow changes described below.
+
+
+## Maintenance follow-up — October 30, 2026
+
+Local implementation on `codex/combined-hand-body` adds long-session storage,
+responsive preview ownership, and repository organization. These changes are
+not a claim of a newly published package or a physical hardware accuracy test.
+
+- Recording buffers at most 4096 frames by default, writes bounded schema-1/2
+  NPZ chunks and atomic schema-3 manifest checkpoints, and preserves completed
+  observations after Ctrl+C or handled model/capture errors. Replay/export use
+  `iter_session_chunks`; whole-session materialization retains a default 256 MiB
+  result limit with an explicit override for trusted data.
+- A synthetic 100,000-frame combined run (55.56 source minutes at 30 FPS) wrote
+  25 chunks containing 268.44 MiB of uncompressed numeric fields and headers.
+  Incremental loading recovered all frames. The traced writer allocation peak
+  was 13.88 MiB for this repeated-array synthetic fixture, not a measurement of
+  total process/model RAM or participant-video tracking performance.
+- Live GUI capture, model initialization/inference, switching, and native cleanup
+  now run on one worker thread. The UI consumes a single latest-frame slot and
+  waits asynchronously for stop/close. Tests gate native initialization/read calls
+  to verify event-loop progress, ownership, failed switches and shutdown.
+- Native offscreen Qt checks processed a public pose fixture video in hands, pose
+  and holistic modes, reached EOF, released resources, and closed. The event-loop
+  heartbeat continued. This does not replace a physical unplug/replug retest.
+- The complete software suite passes 153 tests. Lint/type checks, strict docs,
+  distribution metadata and installed consumer checks are validation gates for
+  this maintenance change.
+- Ninety historical Flex report/figure files were moved intact to
+  `research/camera-placement` and indexed. Hash verification covered 119 research,
+  calibration, and archived local legacy files. Participant/experiment data stays
+  at its established paths. Twenty-five generated CMake/compiler artifacts were
+  removed from Git tracking while retained locally; ignore patterns prevent
+  reintroduction. Active `handtrack`/`unity_hand_tracking` interfaces are retained.
+
+Historical Flex numerical results predate the camera-geometry corrections and
+lack calibration hashes/source revisions. They remain historical evidence rather
+than updated accuracy claims. The working `.venv`, media used by documentation/CI,
+and local untracked experiments remain available. Temporary validation/build and
+site output can be regenerated and are excluded from source control.
+
+
+## Project environment isolation — October 30, 2026
+
+The tracker `.venv` contained an editable Mini-Arm installation, Qt6/PySide6,
+an older Sphinx documentation stack, and both OpenCV distributions. Package
+versions and before/after inventories were saved in ignored
+`build/environment-cleanup/` before pruning.
+
+Mini-Arm's existing separate `.venv` was updated with its current editable
+package plus the same PySide6 6.11.0 and pylsl 1.18.1 versions. Its dependency
+check, CLI help, core imports and an offscreen native Qt6 widget passed without
+connecting to robot hardware. MAVIS then removed 38 non-MAVIS packages, retaining
+43 packages for its installed runtime, visualization, streaming, serial/YAML
+utilities and tests. `opencv-python` was removed and the exact installed
+`opencv-contrib-python` 4.13.0.92 wheel reinstalled to repair overlapping files.
+
+MAVIS `.venv` decreased from 1634.53 MiB to 925.91 MiB (708.61 MiB smaller).
+Most Qt6 space moved to Mini-Arm's own environment; it was not a comparable net
+machine-wide disk saving. Unused Sphinx tools were removed, not relocated.
+
+The cleaned MAVIS environment passes `pip check`, all 153 regression tests,
+positive hand video inference, positive combined hand/body inference, native
+Qt5 hands/pose/holistic preview checks and both flat/chunked recording/replay/CSV
+export. An initial restricted AppContainer run hit temporary file-rename access
+errors; the normal workspace-access rerun passed. No runtime source or research
+files were changed as part of the environment isolation.
+
+
+## External research workspace — November 1, 2026
+
+The local root `data/` and `archive/`, the RNN example's data/figures, and the
+complete remaining `build/` snapshot were relocated to
+`~/Documents/Hand-Landmark-Tracker-Research/`. The external
+`relocation-manifest.json` records original paths, destinations, sizes and
+SHA-256 hashes for all 172 files (251.76 MiB). Hashes were verified immediately
+after the move and after regression checks. The three root folders are absent
+from the checkout; no files from those folders were discarded.
+
+Seven affected EMG/RNN examples now use configurable `--data-dir`/`--video`
+paths, with `MAVIS_DATA_DIR` and the external Documents workspace as defaults.
+The shared path helper is independent of the process working directory and
+loads no optional ML dependencies. Existing session-based `--root_dir` options
+are retained. Training algorithms and model/data bytes were preserved; model
+training/prediction workloads were not rerun in the lean MAVIS environment.
+
+All 163 regression tests pass, including ten new external-path/CLI checks.
+Native Qt hands/pose/holistic preview and positive combined hand/body inference
+passed using relocated validation assets. Recording/replay/export are checked
+separately through the consumer validation script. The working .venv and runtime
+calibration locations were retained. Packaging may regenerate ignored build/
+output later; generated validation records now live outside the checkout.
+
+The requested OptiTrack history inspection found the SDK header version 1.10.0
+and a shipped CameraLibrary2015x64S.dll whose ProductVersion is 1.10.3.5 (the
+FileVersion resource is generically 1,0,0,0). Commit d0981e4 also contains
+optitrack_cam.cp311-win_amd64.pyd. Release-cleanup commit ced0db4 removed these
+vendor assets on October 4, 2026. Inspection did not install or activate the SDK;
+version/path/hash evidence is stored in external validation/optitrack-history.json.

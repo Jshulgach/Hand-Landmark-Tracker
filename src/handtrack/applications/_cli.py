@@ -110,6 +110,8 @@ def _run_record(args: argparse.Namespace) -> int:
         "--confidence",
         str(args.confidence),
     ]
+    argv.extend(["--chunk-frames", str(args.chunk_frames), "--mode", args.mode, "--visibility-threshold", str(args.visibility_threshold),
+                 "--max-gap", str(args.max_gap)])
     if args.session_name is not None:
         argv.extend(["--session-name", args.session_name])
     if args.frames is not None:
@@ -247,6 +249,13 @@ def build_parser() -> argparse.ArgumentParser:
         "record",
         help="record a webcam or video source into a session bundle",
     )
+    record_parser.add_argument("--chunk-frames", type=int, default=4096,
+                               help="maximum buffered frames, 1-16384 (default 4096)")
+    record_parser.add_argument("--mode", choices=("hands", "hand-body"), default="hands",
+                               help="hand-only or synchronized single-person hand/body tracking")
+    record_parser.add_argument("--visibility-threshold", type=float, default=0.5)
+    record_parser.add_argument("--max-gap", type=float, default=0.5,
+                               help="tracking gap threshold in seconds")
     record_parser.add_argument(
         "--source",
         default="0",
@@ -293,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument(
         "--no-kalman",
         action="store_true",
-        help="disable Kalman smoothing and save raw landmarks only",
+        help="disable hand landmark Kalman smoothing",
     )
     record_parser.add_argument(
         "--verbose",

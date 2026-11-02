@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from mavis_track import HandTracker, __version__, load_session
+from mavis_track import HandTracker, __version__, iter_session_chunks, load_session
 
 
 def verify_positive_video(tracker, source, diagnostics=None):
@@ -91,7 +91,16 @@ def main():
         cli("export", folder / "roundtrip")
         manifest = json.loads((folder / "roundtrip" / "exports" / "export_manifest.json").read_text())
         assert manifest
-        print("Installed mavis-track wheel: metadata, command, API and record/replay/export passed")
+        cli("record", "--mode", "hand-body", "--source", clip, "--chunk-frames", "2",
+            "--output-dir", folder, "--session-name", "combined-chunks")
+        combined = folder / "combined-chunks"
+        chunks = list(iter_session_chunks(combined))
+        assert [len(chunk.time_vector) for chunk in chunks] == [2, 1]
+        assert all(not chunk.body_valid.any() for chunk in chunks)
+        assert all(chunk.quality_flags.shape[1] == 3 for chunk in chunks)
+        cli("replay", combined, "--no-display")
+        cli("export", combined)
+        print("Installed mavis-track wheel: metadata, command, API, flat/chunked record/replay/export passed")
 
 if __name__ == "__main__":
     main()

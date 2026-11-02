@@ -31,6 +31,8 @@ def main():
             if group == "core":
                 source = ROOT / "examples" / "01_basic_tracking" / "mavis_webcam.py"
                 archive.write(source, "mavis_webcam.py")
+                source = ROOT / "examples" / "01_basic_tracking" / "mavis_hand_body.py"
+                archive.write(source, "mavis_hand_body.py")
                 for source in (ROOT / "src" / "unity_hand_tracking").glob("*_Hand_Listener.cs"):
                     archive.write(source, "unity/" + source.name)
         with zipfile.ZipFile(path) as archive:

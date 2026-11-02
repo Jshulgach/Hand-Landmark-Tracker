@@ -11,9 +11,9 @@ for compatibility. Use `mavis-track COMMAND --help` for all options.
 | `calibrate --backend webcam` | Capture and validate ChArUco calibration |
 | `board --backend webcam` | Generate calibration board |
 | `cameras --backend webcam` | Preview capture devices |
-| `record` | Record one source with one or two hand slots |
-| `replay` | Draw recorded image-normalized hands using saved timestamps |
-| `export` | Rectangular CSV landmarks, angles, and hand metadata |
+| `record` | Record hands, or synchronized hands/body with `--mode hand-body` |
+| `replay` | Draw recorded hands/body using saved timestamps |
+| `export` | Hand/body CSV landmarks, angles, presence and quality metadata |
 | `doctor --backend webcam` | Required and optional runtime dependency checks |
 | `inspect-calibration --backend webcam` | Inspect saved calibration |
 | `benchmark --backend webcam` | Calibrated backend timing; requires calibration |
@@ -23,6 +23,7 @@ for compatibility. Use `mavis-track COMMAND --help` for all options.
 mavis-track demo --source 0 --mode hands
 mavis-track demo --source clip.mp4 --mode pose
 mavis-track record --source 0 --frames 300 --max-hands 2 --session-name demo
+mavis-track record --mode hand-body --source 0 --frames 300 --session-name reach
 mavis-track replay recordings/demo
 mavis-track replay recordings/demo --no-display
 mavis-track export recordings/demo --variant raw_landmarks
@@ -41,3 +42,24 @@ them. It accepts a session folder or an NPZ path.
 Backend commands support `--backend auto|webcam|optitrack`; auto prefers an
 installed OptiTrack SDK. `demo` always uses one OpenCV source. Select a backend
 explicitly when commissioning calibrated cameras.
+
+Combined hand/body recording uses one person's Holistic result per source frame.
+Use `--visibility-threshold 0.5` and `--max-gap 0.5` to configure quality checks.
+It stores two hand slots plus body points, body visibility, and per-region flags
+on one timeline in session schema 2. Replay and annotated video include the body;
+export adds `body_landmarks.csv` and `tracking_quality.csv`. Hand-only recording
+continues to use schema 1. See [combined tracking](integration.md#combined-hand-and-body-tracking)
+for coordinate definitions, flag meanings, and single-person limitations.
+
+
+Long recordings flush every `--chunk-frames` observations (default 4096), with a
+small final chunk as needed. Short recordings retain `landmarks.npz`; long ones
+use a schema-3 `session.json` and bounded NPZ files in `chunks/`. Replay/export
+accept the same session directory and stream it. Ctrl+C preserves completed
+observations and marks the recording incomplete. See the
+[long-recording guide](integration.md#long-recordings-and-bounded-memory-analysis).
+
+The live desktop studio performs capture, model initialization, inference and
+mode switching in a worker. The preview always uses the newest available frame.
+Stop and close remain responsive while native operations finish; the camera is
+released by its owning worker before another capture is started.

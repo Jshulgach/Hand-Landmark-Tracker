@@ -67,6 +67,7 @@ See [the integration guide](docs/integration.md) and the complete
 
 ```bash
 mavis-track record --source 0 --frames 300 --max-hands 2 --session-name demo
+mavis-track record --mode hand-body --source 0 --frames 300 --session-name reach
 mavis-track replay recordings/demo
 mavis-track export recordings/demo
 ```
@@ -75,6 +76,13 @@ Recordings contain a numeric `landmarks.npz` and `session.json`; optional
 `--save-video` adds annotated video. Export writes rectangular landmark,
 angle, and hand identity CSVs. Missing hands use a validity mask and NaNs.
 Replay honors recorded timestamps, including variable camera timing.
+
+For synchronized single-person hand/body processing, import `HandBodyTracker`
+from `mavis_track`. It returns body landmarks and both hands from the same frame,
+with per-region missing-data, visibility, bounds, and timing flags. Combined
+recordings retain body visibility and quality metadata; replay/export support
+both regions. See the [combined API guide](docs/integration.md#combined-hand-and-body-tracking)
+for usage and coordinate definitions.
 
 ## Coordinates and measurement limits
 
@@ -130,3 +138,29 @@ MAVIS source is MIT licensed. Optional Qt dependencies and proprietary SDKs
 retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 
+
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `src/mavis_track/` | Public frame API, numeric sessions and incremental recording |
+| `src/handtrack/` | CLI, processing, GUI and compatibility interfaces |
+| `src/unity_hand_tracking/` | Active advanced webcam/OptiTrack implementations and Unity compatibility |
+| `tests/` | Hardware-independent regression tests |
+| `examples/` | Runnable examples and retained research workflows |
+| `research/camera-placement/` | Preserved historical Flex placement evaluations |
+| `outputs/`, `recordings/` | Ignored new experiment outputs |
+| `build/`, `site/`, tool caches | Ignored packaging outputs; cleared after use |
+
+Recording, replay and export support bounded chunks for long sessions; see the
+[streaming guide](docs/integration.md#long-recordings-and-bounded-memory-analysis).
+The live studio keeps capture/inference off the GUI thread and displays the
+latest preview without a backlog. Historical placement reports are indexed in
+[research](research/camera-placement/README.md).
+
+
+Research datasets, model weights, local legacy scripts and validation snapshots
+are stored outside the checkout in `~/Documents/Hand-Landmark-Tracker-Research/`.
+The examples accept `--data-dir` and `--video`; `MAVIS_DATA_DIR` can select another
+shared data root. See [external research data](docs/research-data.md).

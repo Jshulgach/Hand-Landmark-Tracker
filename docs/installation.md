@@ -65,3 +65,21 @@ python -m twine check dist/*
 Install the resulting wheel in a fresh environment and run
 `scripts/consumer_smoke.py` from outside the repository. Development tests also
 exercise the source tree, so passing those alone does not establish wheel completeness.
+
+
+## Keep project environments separate
+
+Use this repository's `.venv` for MAVIS. Activate Mini-Arm's own `.venv` from
+its repository when working on Mini-Arm. MAVIS uses PyQt5/Qt5; Mini-Arm's desktop
+runtime uses PySide6/Qt6. Keeping these installations separate avoids pulling
+both Qt runtimes and unrelated documentation tools into the tracker environment.
+
+For a focused source installation, use `python -m pip install -e ".[gui,stream]"`
+in the MAVIS environment. Add the other extras only for the workflows you use.
+Sphinx is not needed for MAVIS tracking; its documentation build uses the `docs`
+extra (MkDocs). MediaPipe still declares JAX/JAXlib, Matplotlib and sounddevice
+as dependencies, so those remain installed even for camera tracking.
+
+Research datasets and trained weights are stored outside the checkout. See the
+[external-data guide](research-data.md) for `--data-dir`, `--video` and
+`MAVIS_DATA_DIR` configuration.

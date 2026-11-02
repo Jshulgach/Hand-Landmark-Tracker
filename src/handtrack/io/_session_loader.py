@@ -103,6 +103,10 @@ class SessionLoader:
             landmarks_path = nested_landmarks_path
         elif os.path.exists(root_landmarks_path):
             landmarks_path = root_landmarks_path
+        elif not self.label and os.path.isfile(os.path.join(landmarks_dir, "session.json")):
+            landmarks_path = landmarks_dir
+        elif not self.label and os.path.isfile(os.path.join(self.root_dir, "session.json")):
+            landmarks_path = self.root_dir
         else:
             if self.verbose:
                 print(
