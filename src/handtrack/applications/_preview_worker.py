@@ -26,9 +26,16 @@ class PreviewWorker(threading.Thread):
     unread preview; no per-frame Qt signals or unbounded work queue are used.
     """
 
-    def __init__(self, source=0, mode="hands"):
+    def __init__(self, source=0, mode="hands", *, model="mediapipe", wilor_root=None,
+                 wilor_device="auto", wilor_fast=False):
         super().__init__(daemon=True, name="MAVIS-preview")
         self.source = source
+        if model not in ("mediapipe", "wilor"):
+            raise ValueError("model must be mediapipe or wilor")
+        if model == "wilor" and TrackingMode.parse(mode) is not TrackingMode.HANDS:
+            raise ValueError("WiLoR supports hands only")
+        self.model = model
+        self._wilor_options = dict(root=wilor_root, device=wilor_device, fast=wilor_fast)
         self._lock = threading.Lock()
         self._stop_requested = threading.Event()
         self._mode = TrackingMode.parse(mode)
@@ -66,7 +73,11 @@ class PreviewWorker(threading.Thread):
                 raise RuntimeError(f"Unable to open camera source {self.source!r}")
             if not isinstance(self.source, str):
                 capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            tracker = MediaPipeModeTracker(self._requested_mode)
+            if self.model == "wilor":
+                from ._wilor_preview import WiLoRModeTracker
+                tracker = WiLoRModeTracker(**self._wilor_options)
+            else:
+                tracker = MediaPipeModeTracker(self._requested_mode)
             rate = float(capture.get(cv2.CAP_PROP_FPS))
             period = 1 / rate if isinstance(self.source, str) and np.isfinite(rate) and rate > 0 else 0
             with self._lock:
@@ -107,7 +118,7 @@ class PreviewWorker(threading.Thread):
                 display.flags.writeable = False
                 frames += 1
                 preview = PreviewFrame(display, tracker.mode,
-                    len(result.hands) + len(result.faces) + len(result.poses),
+                    len(result.hands) + len(getattr(result, "faces", ())) + len(getattr(result, "poses", ())),
                     frames / max(time.perf_counter() - started, 1e-6))
                 with self._lock:
                     if revision == self._revision and not self._stop_requested.is_set():

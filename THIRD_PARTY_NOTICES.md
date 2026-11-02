@@ -43,3 +43,13 @@ alongside the MAVIS license and these notices. The local bundle excludes all
 vendor SDK DLLs, headers and import libraries. OptiTrack's separate terms still
 apply to SDK use. No compiled illumination binding is shipped in the MAVIS
 wheel, source distribution or curated example downloads.
+
+## Optional WiLoR runtime
+
+The experimental WiLoR adapter loads a separately obtained official
+[WiLoR checkout](https://github.com/rolpotamias/WiLoR).
+WiLoR's repository and model license is
+[CC BY-NC-ND 4.0](https://github.com/rolpotamias/WiLoR/blob/main/license.txt).
+MANO assets and Ultralytics dependencies have their own licenses referenced
+by upstream. MAVIS does not bundle or relicense these assets or third-party source.
+The OpenCV preview draws projected geometry without copying upstream renderer code.
