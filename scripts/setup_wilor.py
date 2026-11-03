@@ -43,6 +43,7 @@ def _run(command, *, env=None):
 
 
 def prepare_source(root: Path):
+    print("Preparing WiLoR source with Git (no Python packages are installed).", flush=True)
     if root.exists():
         if not (root / ".git").is_dir():
             raise RuntimeError(f"Existing directory preserved: {root}; expected a WiLoR Git checkout")
@@ -130,6 +131,7 @@ def install_environment(installer="auto"):
             raise RuntimeError(f"Existing runtime uses Python {version}; preserved")
     else:
         venv.EnvBuilder(with_pip=True).create(folder)
+    print(f"Installing WiLoR packages into {python}", flush=True)
     runtime_env = os.environ.copy()
     runtime_env["VIRTUAL_ENV"] = str(folder)
     runtime_env["PATH"] = str(python.parent) + os.pathsep + runtime_env.get("PATH", "")
@@ -148,11 +150,11 @@ def install_environment(installer="auto"):
         _run([uv, "--native-tls", "pip", "install", "--python", python,
               "--no-deps", "-e", REPO], env=runtime_env)
     else:
-        version = subprocess.check_output(
-            [str(python), "-c", "import pip; print(pip.__version__)"], text=True).strip()
-        pip_version = tuple(int(value) for value in version.split(".")[:2])
-        trust = ["--use-feature=truststore"] if pip_version < (24, 2) else []
-        _run([python, "-m", "pip", "install", *trust,
+        # Fresh Python 3.11 environments can contain pip 23.1, which cannot
+        # enable truststore before that package is installed. Bootstrap with
+        # pip's normal certificate validation; the pinned modern pip includes
+        # truststore and uses system certificates for the remaining installs.
+        _run([python, "-m", "pip", "install",
               "--upgrade", *BOOTSTRAP], env=runtime_env)
         _run([python, "-m", "pip", "install", "--no-build-isolation",
               "-r", lock], env=runtime_env)
