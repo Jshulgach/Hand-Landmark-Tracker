@@ -15,6 +15,7 @@ __all__ = [
     "TrackingQuality",
     "WiLoRFrameResult",
     "WiLoRHandResult",
+    "WiLoRMultiViewTracker",
     "WiLoRTracker",
     "iter_session_chunks",
     "load_session",
@@ -22,7 +23,7 @@ __all__ = [
 
 
 def __getattr__(name):
-    if name in {"WiLoRTracker", "WiLoRHandResult", "WiLoRFrameResult"}:
+    if name in {"WiLoRTracker", "WiLoRMultiViewTracker", "WiLoRHandResult", "WiLoRFrameResult"}:
         from . import wilor
         return getattr(wilor, name)
     if name in {"HandBodyTracker", "HandBodyFrameResult", "BodyResult", "TrackingQuality",

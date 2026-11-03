@@ -5,10 +5,12 @@ No model weights, licensed MANO assets, or third-party source are bundled.
 """
 from __future__ import annotations
 
+import copy
 import importlib
 import os
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -170,27 +172,43 @@ class _OfficialWiLoR:
         self.faces.flags.writeable = False
 
     def infer(self, bgr: np.ndarray, confidence: float, max_hands: int):
+        return self.infer_many([bgr], confidence, max_hands, batch_size=max_hands)[0]
+
+    def infer_many(self, images, confidence: float, max_hands: int, *, batch_size=2):
+        """Detect each view, then batch crops across views through one model."""
         torch = self.torch
-        boxes = self.detector.predict(
-            bgr, conf=confidence, max_det=max_hands, verbose=False)[0].boxes
-        if boxes is None or len(boxes) == 0:
-            return []
-        detections = boxes.data.detach().float().cpu().numpy()
-        valid = (np.isfinite(detections).all(axis=1)
-                 & np.isin(detections[:, 5], [0, 1])
-                 & (detections[:, 2] > detections[:, 0])
-                 & (detections[:, 3] > detections[:, 1])
-                 & (detections[:, 4] >= confidence)
-                 & (detections[:, 4] <= 1))
-        detections = detections[valid]
-        detections = detections[np.argsort(-detections[:, 4])][:max_hands]
-        if not len(detections):
-            return []
-        dataset = self.dataset(self.cfg, bgr, detections[:, :4], detections[:, 5],
-                               rescale_factor=2.0, fp16=self.fast)
-        loader = torch.utils.data.DataLoader(dataset, batch_size=max_hands,
-                                             shuffle=False, num_workers=0)
-        results = []
+        datasets: list[Any] = []
+        rows: list[tuple[int, int]] = []
+        per_view: list[Any] = []
+        results: list[list[dict[str, Any]]] = [[] for _ in images]
+        for view, bgr in enumerate(images):
+            boxes = self.detector.predict(
+                bgr, conf=confidence, max_det=max_hands, verbose=False)[0].boxes
+            if boxes is None or len(boxes) == 0:
+                per_view.append(None)
+                continue
+            detections = boxes.data.detach().float().cpu().numpy()
+            valid = (np.isfinite(detections).all(axis=1)
+                     & np.isin(detections[:, 5], [0, 1])
+                     & (detections[:, 2] > detections[:, 0])
+                     & (detections[:, 3] > detections[:, 1])
+                     & (detections[:, 4] >= confidence)
+                     & (detections[:, 4] <= 1))
+            detections = detections[valid]
+            detections = detections[np.argsort(-detections[:, 4])][:max_hands]
+            per_view.append(detections)
+            if not len(detections):
+                continue
+            datasets.append(self.dataset(
+                self.cfg, bgr, detections[:, :4], detections[:, 5],
+                rescale_factor=2.0, fp16=self.fast))
+            rows.extend((view, person) for person in range(len(detections)))
+        if not datasets:
+            return results
+        loader = torch.utils.data.DataLoader(
+            torch.utils.data.ConcatDataset(datasets), batch_size=batch_size,
+            shuffle=False, num_workers=0)
+        offset = 0
         with torch.inference_mode():
             for batch in loader:
                 batch = {key: value.to(self.device) if hasattr(value, "to") else value
@@ -198,16 +216,24 @@ class _OfficialWiLoR:
                 output = self.model(batch)
                 def cpu(value):
                     return value.detach().float().cpu().numpy()
-                for index, person in enumerate(cpu(batch["personid"]).astype(int)):
-                    results.append({
-                        "joints": cpu(output["pred_keypoints_3d"][index]),
-                        "vertices": cpu(output["pred_vertices"][index]),
-                        "camera": cpu(output["pred_cam"][index]),
-                        "center": cpu(batch["box_center"][index]),
-                        "box_size": float(batch["box_size"][index].item()),
-                        "bbox": detections[person, :4],
+                joints = cpu(output["pred_keypoints_3d"])
+                vertices = cpu(output["pred_vertices"])
+                cameras = cpu(output["pred_cam"])
+                centers = cpu(batch["box_center"])
+                sizes = cpu(batch["box_size"])
+                people = cpu(batch["personid"]).astype(int)
+                for index, person in enumerate(people):
+                    view, expected_person = rows[offset + index]
+                    if person != expected_person:
+                        raise RuntimeError("WiLoR crop order changed; refusing cross-camera association")
+                    detections = per_view[view]
+                    results[view].append({
+                        "joints": joints[index], "vertices": vertices[index],
+                        "camera": cameras[index], "center": centers[index],
+                        "box_size": float(sizes[index]), "bbox": detections[person, :4],
                         "score": float(detections[person, 4]),
                         "right": int(detections[person, 5])})
+                offset += len(people)
         return results
 
     def close(self):
@@ -251,8 +277,8 @@ class WiLoRTracker:
         self._frame_id = self._next_id = 0
         self._tracks: dict[int, tuple[np.ndarray, str]] = {}
 
-    def process(self, frame: np.ndarray, *, color: Literal["bgr", "rgb"] = "bgr",
-                timestamp: float | None = None) -> WiLoRFrameResult:
+    def _prepare_frame(self, frame: np.ndarray, *, color: Literal["bgr", "rgb"] = "bgr",
+                timestamp: float | None = None) -> tuple[np.ndarray, float]:
         if self._runtime is None:
             raise RuntimeError("WiLoR tracker is closed")
         if (not isinstance(frame, np.ndarray) or frame.dtype != np.uint8
@@ -265,13 +291,25 @@ class WiLoRTracker:
                 or (self._last_timestamp is not None and stamp <= self._last_timestamp)):
             raise ValueError("timestamps must be finite, nonnegative and increasing")
         bgr = np.ascontiguousarray(frame[:, :, ::-1] if color == "rgb" else frame).copy()
+        return bgr, stamp
+
+    def process(self, frame: np.ndarray, *, color: Literal["bgr", "rgb"] = "bgr",
+                timestamp: float | None = None) -> WiLoRFrameResult:
+        bgr, stamp = self._prepare_frame(frame, color=color, timestamp=timestamp)
+        assert self._runtime is not None
+        items = self._runtime.infer(bgr, self.confidence, self.max_hands)
+        return self._build_result(bgr, items, stamp, timestamp is not None)
+
+    def _build_result(self, frame: np.ndarray, items: list[dict[str, Any]],
+                      stamp: float, source_clock: bool) -> WiLoRFrameResult:
+        assert self._runtime is not None
         height, width = frame.shape[:2]
         focal = float(self._runtime.cfg.EXTRA.FOCAL_LENGTH) / self._runtime.cfg.MODEL.IMAGE_SIZE * max(width, height)
         old = self._tracks if self._last_timestamp is not None and stamp - self._last_timestamp <= .5 else {}
         available = set(old)
         tracks, hands = {}, []
         from handtrack.processing._joint_angles import compute_all_joint_angles
-        for item in self._runtime.infer(bgr, self.confidence, self.max_hands):
+        for item in items:
             image, image_mesh, joints, vertices, translation = _project_hand(
                 item["joints"], item["vertices"], item["camera"], item["center"],
                 item["box_size"], (width, height), focal, item["right"])
@@ -293,7 +331,7 @@ class WiLoRTracker:
                 compute_all_joint_angles(joints)))
         result = WiLoRFrameResult(
             self._frame_id, stamp, self.source_id, (width, height), tuple(hands), focal,
-            "source" if timestamp is not None else "monotonic")
+            "source" if source_clock else "monotonic")
         self._tracks = tracks
         self._frame_id += 1
         self._last_timestamp = stamp
@@ -311,4 +349,89 @@ class WiLoRTracker:
         return self
 
     def __exit__(self, *_: object):
+        self.close()
+
+
+
+class WiLoRMultiViewTracker:
+    """One inference runtime shared across independent, ordered camera views.
+
+    Track IDs belong to each view's source_id; no cross-camera hand association
+    or hardware synchronization is inferred. None marks a missing camera frame.
+    3D outputs retain each camera's separate monocular model coordinate system.
+    """
+
+    def __init__(self, *, batch_size: int = 2, **kwargs: Any) -> None:
+        if type(batch_size) is not int or not 1 <= batch_size <= 16:
+            raise ValueError("batch_size must be an integer between 1 and 16")
+        self._owner = WiLoRTracker(**kwargs)
+        self.batch_size = batch_size
+        self.faces = self._owner.faces
+        self.device = self._owner.device
+        self._views: dict[int, WiLoRTracker] = {}
+
+    @property
+    def confidence(self):
+        return self._owner.confidence
+
+    @confidence.setter
+    def confidence(self, value):
+        if not np.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError("confidence must be between 0 and 1")
+        self._owner.confidence = float(value)
+
+    def process_views(self, frames: Sequence[np.ndarray | None], *,
+                      color: Literal["bgr", "rgb"] = "bgr",
+                      timestamp: float | None = None) -> tuple[WiLoRFrameResult | None, ...]:
+        runtime = self._owner._runtime
+        if runtime is None:
+            raise RuntimeError("WiLoR multi-view tracker is closed")
+        frames = list(frames)
+        stamp = time.perf_counter() if timestamp is None else float(timestamp)
+        if not np.isfinite(stamp) or stamp < 0:
+            raise ValueError("timestamps must be finite and nonnegative")
+        if color not in ("bgr", "rgb"):
+            raise ValueError("color must be bgr or rgb")
+        images, indices = [], []
+        for index, frame in enumerate(frames):
+            if frame is None:
+                continue
+            if index not in self._views:
+                # Only immutable settings and the runtime are shared. Each view
+                # owns its timestamp, counters and adjacent-frame association.
+                view = copy.copy(self._owner)
+                view.source_id = f"{self._owner.source_id}:camera:{index}"
+                view._tracks = {}
+                view._frame_id = view._next_id = 0
+                view._last_timestamp = None
+                self._views[index] = view
+            image, _ = self._views[index]._prepare_frame(frame, color=color, timestamp=stamp)
+            images.append(image)
+            indices.append(index)
+        predictions = (runtime.infer_many(
+            images, self.confidence, self._owner.max_hands, batch_size=self.batch_size)
+            if images else [])
+        if len(predictions) != len(images):
+            raise RuntimeError("WiLoR did not return one prediction list per supplied view")
+        results: list[WiLoRFrameResult | None] = [None] * len(frames)
+        for index, image, items in zip(indices, images, predictions):
+            results[index] = self._views[index]._build_result(
+                image, items, stamp, timestamp is not None)
+        for index, view in list(self._views.items()):
+            if index >= len(frames):
+                del self._views[index]
+            elif frames[index] is None:
+                view._tracks.clear()
+        return tuple(results)
+
+    def close(self):
+        self._views.clear()
+        self._owner.close()
+
+    def __enter__(self):
+        if self._owner._runtime is None:
+            raise RuntimeError("WiLoR multi-view tracker is closed")
+        return self
+
+    def __exit__(self, *_):
         self.close()

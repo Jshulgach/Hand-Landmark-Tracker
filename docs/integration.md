@@ -288,7 +288,8 @@ on orderly stop; a force-killed video may require codec-specific recovery.
 ## Optional WiLoR hand inference
 
 Source installations also expose `WiLoRTracker`, `WiLoRHandResult` and
-`WiLoRFrameResult`. The WiLoR API accepts caller-owned frames and returns
+`WiLoRFrameResult`, with `WiLoRMultiViewTracker` for shared-model
+inference over ordered camera frames. The WiLoR API accepts caller-owned frames and returns
 pixel projections, wrist-relative 3D joints, mesh vertices and geometric angles.
 Its result types keep monocular model coordinates separate from MediaPipe and
 calibrated reconstruction. See [setup, examples and validation status](wilor.md).

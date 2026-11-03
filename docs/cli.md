@@ -75,5 +75,12 @@ After the [isolated WiLoR setup](wilor.md), source checkouts support:
 
 Use `--wilor-device cuda --wilor-fast` to request CUDA half precision and
 layer skipping, or `--wilor-root PATH` for a shared source/assets folder.
-WiLoR supports hands in single-source preview and the frame API. It is not yet
-connected to the advanced OptiTrack GUI, recording or streaming.
+WiLoR supports single-source and OptiTrack multi-camera hand preview:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track gui --backend optitrack --model wilor --wilor-device cuda --wilor-fast --wilor-batch-size 2
+```
+
+The grid opens every connected OptiTrack camera. Click Start Tracking and choose
+matched mesh overlays or independent live camera feeds. WiLoR calibrated
+triangulation, recording and streaming are not enabled.

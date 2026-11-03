@@ -38,11 +38,12 @@ long-session behavior still need evaluation. A plausible mesh is not an accuracy
 measurement.
 
 This first adapter supports **hands only**, with up to two detected hands.
-Face/body/holistic modes remain MediaPipe. WiLoR is not yet connected to the
-advanced OptiTrack GUI, calibrated triangulation, recording, UDP or LSL. Explicit
-unsupported CLI combinations fail rather than silently selecting MediaPipe.
-A Python caller can supply frames from any camera, including OptiTrack, but must
-own capture and any multi-camera association/synchronization.
+Face/body/holistic modes remain MediaPipe. WiLoR also supports OptiTrack
+multi-camera viewing with per-camera meshes and joints. This preview uses one
+shared model, independent per-view tracking and bounded crop batches.
+Calibrated triangulation, recording, UDP and LSL are not enabled for WiLoR.
+A Python caller can supply any image sources through the multi-view API; camera
+capture and hardware synchronization remain the caller's responsibility.
 
 A good-looking mesh in a web demo does not establish joint-angle accuracy or
 performance on our infrared camera images. See the evaluation plan below.
@@ -202,6 +203,62 @@ Use `--wilor-root` for a shared directory outside the checkout, or set
 `MAVIS_WILOR_ROOT`. Imports and model loading do not change the process working
 directory or download missing files.
 
+## OptiTrack multi-camera GUI
+
+After the isolated environment and the existing OptiTrack SDK/USB driver setup:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track gui --backend optitrack --model wilor --wilor-device cuda --wilor-fast
+```
+
+Click **Start Tracking**. The grid discovers and displays all connected cameras.
+The **MediaPipe / WiLoR** selector can change estimators while tracking is stopped.
+Existing exposure, IR illumination, text zoom, fit/fill and scrolling controls
+are reused. The WiLoR box-score threshold is adjustable; MediaPipe's tracking
+threshold and calibration-dependent controls are disabled for this mode.
+
+One WiLoR network and detector are shared across the feeds. Hand crops from all
+views are combined into bounded inference batches, rather than loading one large
+network per camera. `--wilor-batch-size 2` is the default; choose 1 to lower
+batch memory use. CUDA/fast-mode throughput still requires a target-PC check.
+
+The display selector has two choices:
+
+- **Mesh overlays (matched frames)** shows each result on the exact frame used
+  for inference. The caption displays that frame's host-receipt age.
+- **Live camera feeds** refreshes current video independently while inference
+  runs. Old joints are never painted onto a newer raw frame.
+
+Feeds also remain visible during model loading, and remain available if model
+initialization or inference fails. A disconnected/stale camera clears its tile.
+Stop/close is asynchronous: the GUI stays responsive while the current native
+inference finishes, then the model/cameras are released before another start.
+
+Each view's 3D is a separate monocular model estimate. This mode does not create
+a global reconstructed skeleton, use the saved calibration, or publish fabricated
+3D streams. Saved calibration files are preserved; the MediaPipe path retains
+its existing calibrated reconstruction.
+
+Validation used **four simulated camera feeds with real WiLoR checkpoints** on
+the Intel CPU host: all four views produced a hand mesh, only one runtime loaded,
+raw video appeared during model startup, live rendering continued while inference
+ran, and async shutdown completed. A separate mixed-resolution/missing-view check
+preserved camera indices and a mirrored view's handedness; single/batched joint
+outputs agreed within 3.8e-8 model meters in that reference test. These are
+integration checks, not physical accuracy or GPU performance measurements.
+The four-camera OptiTrack hub and RTX 3060 combination remains hardware-unverified.
+
+For caller-owned multi-camera capture:
+
+```python
+from mavis_track import WiLoRMultiViewTracker
+
+with WiLoRMultiViewTracker(device="cuda", fast=True, batch_size=2) as tracker:
+    results = tracker.process_views([camera_0_bgr, camera_1_bgr, None, camera_3_bgr])
+    # Same order as the inputs; None preserves a missing camera's position.
+    # IDs belong to each result.source_id, not to a shared cross-camera identity.
+```
+
 ## Python frame API
 
 ```python
@@ -263,5 +320,5 @@ whole-body evaluation described in the [model roadmap](mmpose-comparison.md).
 WiLoR's upstream repository/model license is
 [CC BY-NC-ND 4.0](https://github.com/rolpotamias/WiLoR/blob/main/license.txt).
 MANO and Ultralytics have separate terms linked by upstream. These dependencies
-and assets are not relicensed under MAVIS's MIT license. This branch distributes
+and assets are not relicensed under MAVIS's MIT license. MAVIS distributes
 our adapter only, not upstream source, checkpoints or MANO assets.
