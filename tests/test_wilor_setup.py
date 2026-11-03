@@ -88,3 +88,29 @@ def test_foreign_existing_environment_is_preserved(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="preserved"):
         setup.install_environment()
     assert (folder / "user-file.txt").read_text() == "preserve"
+
+
+
+def test_fresh_pip_bootstrap_does_not_require_uninstalled_truststore(monkeypatch, tmp_path):
+    monkeypatch.setattr(setup, "REPO", tmp_path)
+    monkeypatch.setattr(setup.sys, "platform", "win32")
+    monkeypatch.setattr(setup.sys, "version_info", (3, 11, 4, "final", 0))
+    folder = tmp_path / ".venv-wilor"
+    python = folder / "Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (folder / "pyvenv.cfg").write_text("include-system-site-packages = false")
+    monkeypatch.setattr(setup.subprocess, "check_output", lambda *a, **k: "3.11")
+    monkeypatch.setattr(setup.shutil, "which", lambda _: None)
+    calls = []
+    def run(command, *, env):
+        assert command[0] == python
+        assert env["VIRTUAL_ENV"] == str(folder)
+        assert env["PATH"].split(os.pathsep)[0] == str(python.parent)
+        # This feature fails on fresh pip 23.1 before it can download anything.
+        assert "--use-feature=truststore" not in command
+        calls.append(command)
+    monkeypatch.setattr(setup, "_run", run)
+    setup.install_environment(installer="pip")
+    assert "pip==26.2.2" in calls[0] and "--upgrade" in calls[0]
+    assert calls[-1] == [python, "-m", "pip", "check"]

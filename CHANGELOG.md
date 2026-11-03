@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix WiLoR's pip bootstrap on fresh Python 3.11 environments: upgrade pip before
+  using its built-in system certificate support, without requiring an
+  uninstalled truststore feature. Show the target interpreter during setup.
+
+
 - Add shared-model WiLoR inference and mesh/joint viewing for all connected
   OptiTrack cameras, independent per-view association, bounded cross-view crop
   batches, live-feed/matched-frame display and asynchronous startup/shutdown.

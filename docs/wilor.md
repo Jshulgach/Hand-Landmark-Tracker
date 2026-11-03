@@ -156,6 +156,34 @@ py -3.11 scripts/setup_wilor.py --check --require-cuda
 The doctor reports assets, versions and GPU details without loading checkpoints
 or opening cameras. Asset/package checks do not prove inference accuracy.
 
+## Setup versus launching
+
+The MANO pickle supplies the hand shape model. It does not include WiLoR's
+inference source, detector/reconstruction checkpoints or PyTorch/CUDA packages.
+The setup script prepares those once; it is not needed when launching the GUI.
+
+`--prepare-source` uses only Git and Python's standard library. It does not run
+pip or install `truststore`. If a truststore error appears, retain the complete
+output to identify whether it came from Python startup, Git or a later install
+step.
+
+The pip fallback upgrades the **new `.venv-wilor` interpreter's pip first**.
+Older pip releases cannot enable their optional truststore feature until that
+package exists in the same environment. Installing it in the regular `.venv`
+does not install it in `.venv-wilor`.
+
+For an interrupted package setup, from the repository root:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m pip install --upgrade pip
+py -3.11 scripts/setup_wilor.py --install --require-cuda
+```
+
+Use that first command only if `.venv-wilor/Scripts/python.exe` already exists.
+The setup helper can create the isolated environment if it does not. It
+preserves matching downloaded assets; the MANO file does not need to be
+downloaded again.
+
 ## RTX 3060 target computer
 
 NVIDIA lists the RTX 3060 as
