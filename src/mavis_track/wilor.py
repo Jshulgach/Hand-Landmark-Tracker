@@ -50,7 +50,11 @@ def wilor_root(root: str | Path | None = None) -> Path:
     value = root if root is not None else os.environ.get("MAVIS_WILOR_ROOT")
     if value is None:
         # Source-checkout convenience; installed wheels should use the argument/env.
-        value = Path(__file__).resolve().parents[2] / "external" / "WiLoR"
+        checkout = Path(__file__).resolve().parents[2] / "external" / "WiLoR"
+        adjacent = Path(sys.prefix).parent / "external" / "WiLoR"
+        value = checkout if (checkout / "wilor/models/wilor.py").is_file() else adjacent
+        if not (value / "wilor/models/wilor.py").is_file():
+            value = checkout
     return Path(value).expanduser().resolve()
 
 
@@ -105,8 +109,11 @@ def _detector_class(root: Path):
     # Old detector checkpoints need undeclared dependencies. Never let their
     # loader invoke an unscoped package manager against another environment.
     os.environ["YOLO_AUTOINSTALL"] = "false"
+    os.environ["YOLO_OFFLINE"] = "true"
     os.environ.setdefault("YOLO_CONFIG_DIR", str(root / ".mavis-runtime"))
     ultralytics = importlib.import_module("ultralytics")
+    utils: Any = importlib.import_module("ultralytics.utils")
+    utils.ONLINE = False  # Also cover imports made by the host before MAVIS.
     checks: Any = importlib.import_module("ultralytics.utils.checks")
     checks.AUTOINSTALL = False  # Also cover a host that imported it first.
     ultralytics.settings.update({"sync": False})

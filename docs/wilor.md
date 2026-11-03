@@ -96,6 +96,13 @@ curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main
 curl.exe -L --fail "https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/wilor_final.ckpt" -o external/WiLoR/pretrained_models/wilor_final.ckpt
 ```
 
+## Limited-internet or offline tracking PC
+
+Use the [installation audit and private transfer-kit workflow](wilor-install-audit.md)
+to prepare the wheels and assets on an online PC, then install locally on the
+RTX computer. The target does not need Git, a compiler or Python package indexes.
+Windows/Python, NVIDIA and camera-driver prerequisites still apply.
+
 ## Isolated Windows environment
 
 The tested profile is 64-bit Windows/Python 3.11, PyTorch **2.7.1+cu118**,
