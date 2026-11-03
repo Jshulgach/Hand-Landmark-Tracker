@@ -125,28 +125,37 @@ the installer bootstraps build tooling and disables build isolation for that
 package. The old detector checkpoint also needs `dill`, which is explicitly
 pinned. Runtime Ultralytics auto-installs and settings sync are disabled.
 
-On the **RTX 3060 computer**, from the repository root:
+On the **RTX 3060 computer**, first put your licensed `MANO_RIGHT.pkl` at
+`external/WiLoR/mano_data/MANO_RIGHT.pkl`. This can be the only file in that
+folder; the setup script preserves it in place.
+
+From the repository root:
 
 ```powershell
-git fetch origin
-git switch main
 git pull --ff-only
-py -3.11 scripts/setup_wilor.py --prepare-source
+py -3.11 scripts/setup_wilor.py --setup --require-cuda
 ```
 
-Now copy your licensed `MANO_RIGHT.pkl` into
-`external/WiLoR/mano_data/MANO_RIGHT.pkl`. Then:
+`--setup` performs source preparation, checkpoint download/reuse, isolated
+dependency installation and verification in one command. It checks Python and
+the MANO file before starting downloads. You do not need a separate
+`pip install -e .`; the helper installs MAVIS in editable mode itself.
 
-```powershell
-py -3.11 scripts/setup_wilor.py --download-checkpoints --install --require-cuda
-```
+Source is downloaded into a temporary sibling directory at the pinned upstream
+revision. Every destination is checked before merging. Existing MANO files,
+checkpoints, partial downloads and other files stay in place; different existing
+source files or Git revisions are preserved and reported. Failed preparation
+cleans its temporary checkout and rolls back only newly copied source files.
+A successful rerun reuses the prepared checkout without downloading source again.
 
-This checks out the inspected upstream revision, downloads only the two required
-checkpoints at a pinned Hugging Face revision, verifies size/SHA-256 and installs
-the locked packages in the separate environment. Downloads can resume; an existing
+Only the two required checkpoints are downloaded at a pinned Hugging Face
+revision, with size/SHA-256 verification. Downloads can resume; an existing
 different checkpoint is preserved and reported. Existing matching downloads are
-reused. The `--require-cuda` check requires CUDA availability and a successful
-GPU tensor operation; it fails explicitly on a CPU-only machine.
+reused. Missing checkpoints and CUDA packages can still require large downloads;
+use the private transfer kit if the tracking PC cannot download those.
+
+The `--require-cuda` check requires CUDA availability and a successful GPU tensor
+operation; it fails explicitly on a CPU-only machine. No camera is opened.
 
 Alternatively, copy the already prepared `external/WiLoR` folder from the
 development computer, including its source and models, then use

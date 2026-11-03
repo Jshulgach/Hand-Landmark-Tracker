@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add one-command WiLoR setup with --setup. Source preparation can merge into a
+  folder containing a licensed MANO file and checkpoints, preserving existing
+  assets, rejecting conflicting source files, and cleaning failed preparation.
+
+
 - Add a private WiLoR offline transfer kit with verified wheels/assets, local-only
   installation and a real inference/GUI audit. Disable detector connectivity
   probes, honor WiLoR doctor GUI/backend flags, and discover assets/SDK beside
