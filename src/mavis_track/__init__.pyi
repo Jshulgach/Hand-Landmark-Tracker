@@ -16,4 +16,5 @@ from .body import QualityFlag as QualityFlag
 from .body import TrackingQuality as TrackingQuality
 from .wilor import WiLoRFrameResult as WiLoRFrameResult
 from .wilor import WiLoRHandResult as WiLoRHandResult
+from .wilor import WiLoRMultiViewTracker as WiLoRMultiViewTracker
 from .wilor import WiLoRTracker as WiLoRTracker

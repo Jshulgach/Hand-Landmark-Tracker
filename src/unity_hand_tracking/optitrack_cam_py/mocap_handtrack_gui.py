@@ -169,8 +169,17 @@ from handtrack.applications._display import (
 class StereoHandTrackerGUI(QMainWindow):
     """Main window with multi-camera display and control panel."""
 
-    def __init__(self, calc_splay: bool = False):
+    def __init__(self, calc_splay: bool = False, *, model="mediapipe",
+                 wilor_root=None, wilor_device="auto", wilor_fast=False, wilor_batch_size=2):
         super().__init__()
+        self.inference_model = model
+        self._wilor_options = dict(root=wilor_root, device=wilor_device,
+                                   fast=wilor_fast, batch_size=wilor_batch_size)
+        self._wilor_session = None
+        self._wilor_grid_ready = False
+        self._wilor_draw_packet = None
+        self._wilor_draw_cache = {}
+        self._closing_wilor = False
         self._mediapipe_ready = _MP_PRELOAD_OK
         self._mediapipe_error = _MP_PRELOAD_ERROR
         if not self._mediapipe_ready:
@@ -245,7 +254,9 @@ class StereoHandTrackerGUI(QMainWindow):
         self.init_ui()
         self.setup_timer()
         # Auto-start broadcasting after UI is initialized
-        self.start_udp_broadcast()
+        if model == "mediapipe":
+            self.start_udp_broadcast()
+        self._sync_model_controls()
 
         if not self._mediapipe_ready:
             print(f"[Startup] MediaPipe preload failed: {self._mediapipe_error}")
@@ -437,9 +448,26 @@ class StereoHandTrackerGUI(QMainWindow):
         self.start_btn = QPushButton("Start Tracking")
         self.start_btn.clicked.connect(self.toggle_tracking)
         control_layout.addWidget(self.start_btn)
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("MediaPipe", "mediapipe")
+        self.model_combo.addItem("WiLoR", "wilor")
+        self.model_combo.setCurrentIndex(1 if self.inference_model == "wilor" else 0)
+        self.model_combo.currentIndexChanged.connect(self._on_model_selected)
+        control_layout.addWidget(self.model_combo)
+        self.wilor_view_combo = QComboBox()
+        self.wilor_view_combo.addItem("Mesh overlays (matched frames)", "matched")
+        self.wilor_view_combo.addItem("Live camera feeds", "live")
+        self.wilor_view_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.wilor_view_combo.setMinimumContentsLength(12)
+        self.wilor_view_combo.setToolTip(
+            "Mesh overlays show the exact inference frames with their age. "
+            "Live feeds continue at camera speed while inference runs.")
+        control_layout.addWidget(self.wilor_view_combo)
         self.status_label = QLabel("Status: Stopped")
         self.status_label.setWordWrap(True)
         self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setWordWrap(True)
+        self.status_label.setTextFormat(Qt.PlainText)
         control_layout.addWidget(self.status_label)
         self.calibration_label = QLabel("Calibration will be checked when cameras start.")
         self.calibration_label.setWordWrap(True)
@@ -454,6 +482,8 @@ class StereoHandTrackerGUI(QMainWindow):
         self.hands_label.setStyleSheet("color: #aaa;")
         self.tracked_hand_label = QLabel("Hand: N/A")
         self.tracked_hand_label.setStyleSheet("color: #aaa;")
+        for status_widget in (self.frame_label, self.hands_label, self.tracked_hand_label):
+            status_widget.setWordWrap(True)
         status_row.addWidget(self.frame_label)
         status_row.addWidget(self.hands_label)
         status_row.addWidget(self.tracked_hand_label)
@@ -1127,6 +1157,154 @@ class StereoHandTrackerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     # Tracking start / stop
     # ------------------------------------------------------------------ #
+    def _on_model_selected(self, *_):
+        self.inference_model = self.model_combo.currentData()
+        self._sync_model_controls()
+        if self.inference_model == "mediapipe":
+            self.udp_status.setText("UDP: active" if self.udp_enabled else "UDP: disabled")
+
+    def _sync_model_controls(self):
+        wilor = self.inference_model == "wilor"
+        self.wilor_view_combo.setVisible(wilor)
+        self.min_track_spin.setEnabled(not wilor)
+        self.udp_checkbox.parentWidget().setEnabled(not wilor)
+        self.udp_checkbox.setEnabled(not wilor)
+        self.min_det_spin.setToolTip(
+            "WiLoR hand-box score threshold; not joint confidence." if wilor
+            else "MediaPipe minimum detection confidence.")
+        if wilor:
+            self.min_det_spin.setValue(.3)
+            self.udp_checkbox.setChecked(False)
+            self.udp_enabled = False
+            self.stop_udp_broadcast()
+            self.udp_status.setText("WiLoR: per-camera preview; streams disabled")
+            self._set_reconstruction_available(False)
+
+    def _start_wilor(self):
+        from handtrack.applications._wilor_multicam import WiLoRCameraSession
+        if self._wilor_session is not None:
+            return
+        self._wilor_session = WiLoRCameraSession(
+            **self._wilor_options, confidence=self.min_det_spin.value(),
+            exposure=self.default_exposure)
+        self.tracker = self._wilor_session
+        self._wilor_grid_ready = False
+        self._wilor_draw_packet = None
+        self._wilor_draw_cache.clear()
+        self.frame_count = 0
+        for label in self.video_labels:
+            label.clear()
+            label.setText("Starting cameras...")
+        self.is_running = True
+        self.model_combo.setEnabled(False)
+        self.start_btn.setText("Stop Tracking")
+        self.start_btn.setStyleSheet("background-color: #d43333;")
+        self._set_reconstruction_available(False)
+        self.calibration_label.setText(
+            "Per-camera WiLoR models; calibrated 3D disabled.")
+        self.calibration_label.setToolTip(
+            "Camera-relative model estimates do not share a calibrated 3D origin. "
+            "Saved calibration files are preserved.")
+        self.status_label.setText("Status: Starting cameras / WiLoR...")
+        self._wilor_session.start()
+        self.timer.start(33)
+
+    def _finish_wilor(self):
+        session = self._wilor_session
+        if session is None or session.is_alive():
+            return
+        _, state, error = session.snapshot()
+        session.join(timeout=0)
+        self.illumination_panel.bind_manager(None)
+        self._wilor_session = None
+        self._wilor_draw_packet = None
+        self._wilor_draw_cache.clear()
+        self.tracker = None
+        self.is_running = False
+        self.timer.stop()
+        self.start_btn.setEnabled(True)
+        self.start_btn.setText("Start Tracking")
+        self.start_btn.setStyleSheet("")
+        self.model_combo.setEnabled(True)
+        self._set_reconstruction_available(False)
+        for spin in self.exposure_spinboxes:
+            spin.setEnabled(False)
+        for label in self.video_labels:
+            label.clear()
+        self.status_label.setText(f"Status: {error or state}")
+        if self._closing_wilor:
+            self.close()
+
+    def _update_wilor(self):
+        session = self._wilor_session
+        if not session.is_alive():
+            self._finish_wilor()
+            return
+        if not session.ready.is_set():
+            _, state, error = session.snapshot()
+            self.status_label.setText(f"Status: {error or state}")
+            return
+        if not self._wilor_grid_ready:
+            self._configure_camera_views()
+            self._set_reconstruction_available(False)
+            self._wilor_grid_ready = True
+        packet, state, error = session.snapshot()
+        snapshots = session.raw_snapshots()
+        matched = self.wilor_view_combo.currentData() == "matched" and packet is not None and not error
+        now = time.perf_counter()
+        for index, ((live_frame, _), label) in enumerate(zip(snapshots, self.video_labels)):
+            if live_frame is None:
+                label.clear()
+                label.setText(f"Camera {index}: waiting for fresh frames")
+                continue
+            frame, result = live_frame, None
+            age = None
+            if matched and packet.frames[index] is not None:
+                frame, result = packet.frames[index], packet.results[index]
+                received = packet.received_at[index]
+                age = now - received if received is not None else None
+            cache_key = (index, self.show_raw_video)
+            if packet is not self._wilor_draw_packet:
+                self._wilor_draw_cache.clear()
+                self._wilor_draw_packet = packet
+            if matched and result is not None and cache_key in self._wilor_draw_cache:
+                display = self._wilor_draw_cache[cache_key].copy()
+            else:
+                display = frame.copy()
+                if not self.show_raw_video:
+                    display[:] = 0
+                if result is not None and session.faces is not None:
+                    from handtrack.applications._wilor_preview import draw_wilor
+                    draw_wilor(display, result, session.faces)
+                    self._wilor_draw_cache[cache_key] = display.copy()
+            caption = f"Camera {index}"
+            if age is not None:
+                caption += f" | WiLoR frame age {age:.1f}s"
+            else:
+                caption += " | live"
+            cv2.putText(display, caption, (10, 26), cv2.FONT_HERSHEY_SIMPLEX,
+                        .6, (0, 220, 255) if matched else (80, 230, 80), 2, cv2.LINE_AA)
+            rgb = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
+            height, width = rgb.shape[:2]
+            image = QImage(rgb.data, width, height, rgb.strides[0], QImage.Format_RGB888).copy()
+            label.setPixmap(QPixmap.fromImage(image))
+            if index == 0:
+                self.video_grid.set_image_aspect(width / height)
+        self.frame_count += 1
+        self.frame_label.setText(f"Frames: {self.frame_count}")
+        if packet is not None:
+            count = max((len(result.hands) for result in packet.results if result is not None), default=0)
+            self.hands_label.setText(f"Hands/view: {count}")
+            self.fps_label.setText(f"Inference batch: {1/max(packet.inference_seconds,1e-6):.2f} FPS")
+            self.timing_label.setText(f"All-view inference: {packet.inference_seconds*1000:.0f} ms")
+        else:
+            self.hands_label.setText("Hands/view: --")
+            self.fps_label.setText("WiLoR unavailable" if error else "Loading WiLoR...")
+            self.timing_label.setText("Live camera preview")
+        self.tracked_hand_label.setText("3D: local")
+        self.tracked_hand_label.setToolTip("Independent monocular model coordinates for each camera.")
+        self.status_label.setText(f"Status: {error or state}")
+
     def calibrate_splay_bias(self):
         """Capture current splay angles as zero offsets (v2 method)."""
         if not self.calc_splay:
@@ -1155,8 +1333,75 @@ class StereoHandTrackerGUI(QMainWindow):
         else:
             self.start_tracking()
 
+    def _configure_camera_views(self):
+        self.num_cameras = self.tracker.num_cameras
+        self.illumination_panel.bind_manager(self.tracker.cam_mgr)
+        self.camera_info_label.setText(
+            f"Cameras: {self.num_cameras}\nIDs: {list(range(self.num_cameras))}"
+        )
+
+        # Rebuild the tightly packed camera grid for this capture session.
+        self.video_layout = self.video_grid.reset(self.num_cameras)
+        self.video_labels = []
+        cols = self.video_grid.columns
+        for idx in range(self.num_cameras):
+            label = _ImageLabel()
+            label.set_fill_mode(self.camera_view_combo.currentData() == "fill")
+            label.setStyleSheet("background-color: #111; border: 1px solid #333;")
+            self.video_labels.append(label)
+            self.video_layout.addWidget(label, idx//cols, idx%cols)
+        self.video_grid.refresh_geometry()
+
+        # Dynamically populate exposure grid
+        for i in reversed(range(self.exposure_grid.count())):
+            widget = self.exposure_grid.itemAt(i).widget()
+            if widget and widget not in [
+                self.exposure_grid.itemAt(0).widget(),
+                self.exposure_grid.itemAt(1).widget(),
+                self.exposure_grid.itemAt(2).widget(),
+            ]:
+                widget.setParent(None)
+
+        self.exposure_spinboxes = []
+        self.cam_enabled_checkboxes = []
+        self.enabled_cameras = set(range(self.num_cameras))
+
+        for idx in range(self.num_cameras):
+            cb = QCheckBox()
+            cb.setChecked(True)
+            cb.setToolTip(f"Include camera {idx} in triangulation")
+            cb.toggled.connect(
+                lambda checked, i=idx: self._on_cam_enabled_toggled(i, checked)
+            )
+            self.cam_enabled_checkboxes.append(cb)
+            lbl = QLabel(f"Cam {idx}")
+            lbl.setStyleSheet("color: #aaa; ")
+            spin = QSpinBox()
+            spin.setRange(1, 480)
+            spin.setValue(self.default_exposure)
+            spin.setToolTip(
+                f"Exposure for camera {idx}.\n"
+                "Lower = faster/darker, Higher = slower/brighter."
+            )
+            spin.valueChanged.connect(
+                lambda val, i=idx: self._on_exposure_changed(i, val)
+            )
+            self.exposure_spinboxes.append(spin)
+            row = idx + 1  # row 0 is header
+            self.exposure_grid.addWidget(cb, row, 0, Qt.AlignCenter)
+            self.exposure_grid.addWidget(lbl, row, 1)
+            self.exposure_grid.addWidget(spin, row, 2)
+
+        # Apply current exposure spinbox values to each camera
+        for idx in range(min(self.num_cameras, len(self.exposure_spinboxes))):
+            self.tracker.set_exposure(idx, self.exposure_spinboxes[idx].value())
+        # Apply current triangulation camera selection
+        self.tracker.set_enabled_cameras(set(self.enabled_cameras))
+
     def start_tracking(self):
         """Start multi-camera tracking."""
+        if self.inference_model == "wilor":
+            return self._start_wilor()
         try:
             if not self._mediapipe_ready:
                 self._mediapipe_ready, self._mediapipe_error = (
@@ -1183,69 +1428,7 @@ class StereoHandTrackerGUI(QMainWindow):
             ):
                 self.status_label.setText("Status: Camera init failed")
                 return
-            self.num_cameras = self.tracker.num_cameras
-            self.illumination_panel.bind_manager(self.tracker.cam_mgr)
-            self.camera_info_label.setText(
-                f"Cameras: {self.num_cameras}\nIDs: {list(range(self.num_cameras))}"
-            )
-
-            # Rebuild the tightly packed camera grid for this capture session.
-            self.video_layout = self.video_grid.reset(self.num_cameras)
-            self.video_labels = []
-            cols = self.video_grid.columns
-            for idx in range(self.num_cameras):
-                label = _ImageLabel()
-                label.set_fill_mode(self.camera_view_combo.currentData() == "fill")
-                label.setStyleSheet("background-color: #111; border: 1px solid #333;")
-                self.video_labels.append(label)
-                self.video_layout.addWidget(label, idx//cols, idx%cols)
-            self.video_grid.refresh_geometry()
-
-            # Dynamically populate exposure grid
-            for i in reversed(range(self.exposure_grid.count())):
-                widget = self.exposure_grid.itemAt(i).widget()
-                if widget and widget not in [
-                    self.exposure_grid.itemAt(0).widget(),
-                    self.exposure_grid.itemAt(1).widget(),
-                    self.exposure_grid.itemAt(2).widget(),
-                ]:
-                    widget.setParent(None)
-
-            self.exposure_spinboxes = []
-            self.cam_enabled_checkboxes = []
-            self.enabled_cameras = set(range(self.num_cameras))
-
-            for idx in range(self.num_cameras):
-                cb = QCheckBox()
-                cb.setChecked(True)
-                cb.setToolTip(f"Include camera {idx} in triangulation")
-                cb.toggled.connect(
-                    lambda checked, i=idx: self._on_cam_enabled_toggled(i, checked)
-                )
-                self.cam_enabled_checkboxes.append(cb)
-                lbl = QLabel(f"Cam {idx}")
-                lbl.setStyleSheet("color: #aaa; ")
-                spin = QSpinBox()
-                spin.setRange(1, 480)
-                spin.setValue(self.default_exposure)
-                spin.setToolTip(
-                    f"Exposure for camera {idx}.\n"
-                    "Lower = faster/darker, Higher = slower/brighter."
-                )
-                spin.valueChanged.connect(
-                    lambda val, i=idx: self._on_exposure_changed(i, val)
-                )
-                self.exposure_spinboxes.append(spin)
-                row = idx + 1  # row 0 is header
-                self.exposure_grid.addWidget(cb, row, 0, Qt.AlignCenter)
-                self.exposure_grid.addWidget(lbl, row, 1)
-                self.exposure_grid.addWidget(spin, row, 2)
-
-            # Apply current exposure spinbox values to each camera
-            for idx in range(min(self.num_cameras, len(self.exposure_spinboxes))):
-                self.tracker.set_exposure(idx, self.exposure_spinboxes[idx].value())
-            # Apply current triangulation camera selection
-            self.tracker.set_enabled_cameras(set(self.enabled_cameras))
+            self._configure_camera_views()
             # Ensure LSL outlet exists even if UDP toggle is off
             if self.lsl_broadcaster is None:
                 try:
@@ -1259,6 +1442,7 @@ class StereoHandTrackerGUI(QMainWindow):
             self.reset_kalman_filters()
             # Update UI
             self.is_running = True
+            self.model_combo.setEnabled(False)
             self.start_btn.setText("Stop Tracking")
             self.start_btn.setStyleSheet("background-color: #d43333;")
             self._show_calibration_status()
@@ -1281,6 +1465,15 @@ class StereoHandTrackerGUI(QMainWindow):
 
     def stop_tracking(self):
         """Stop tracking."""
+        if self._wilor_session is not None:
+            self._wilor_session.request_stop()
+            self.illumination_panel.bind_manager(None)
+            self.start_btn.setEnabled(False)
+            self.model_combo.setEnabled(False)
+            for spin in self.exposure_spinboxes:
+                spin.setEnabled(False)
+            self.status_label.setText("Status: Stopping WiLoR...")
+            return
         self.timer.stop()
         self.illumination_panel.bind_manager(None)
         # Stop the processing thread first
@@ -1291,6 +1484,7 @@ class StereoHandTrackerGUI(QMainWindow):
             self.tracker.cleanup()
             self.tracker = None
         self.is_running = False
+        self.model_combo.setEnabled(True)
         self._set_reconstruction_available(False)
         self.start_btn.setText("Start Tracking")
         self.start_btn.setStyleSheet("")
@@ -1302,6 +1496,8 @@ class StereoHandTrackerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     def update_frame(self):
         """Display the latest available result from the processing thread."""
+        if self._wilor_session is not None:
+            return self._update_wilor()
         if not self.tracker or self._proc_thread is None:
             self.stop_tracking()
             return
@@ -1922,6 +2118,11 @@ class StereoHandTrackerGUI(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close."""
+        if self._wilor_session is not None:
+            self._closing_wilor = True
+            self.stop_tracking()
+            event.ignore()
+            return
         self.stop_tracking()
         self.stop_udp_broadcast()
         event.accept()
@@ -1930,7 +2131,7 @@ class StereoHandTrackerGUI(QMainWindow):
 # =============================================================================
 # Main
 # =============================================================================
-def main():
+def main(argv=None):
     # Lower process priority so we don't starve other applications
     try:
         import psutil
@@ -1959,7 +2160,12 @@ def main():
         default=False,
         help="Enable splay-angle computation and streaming (default: False).",
     )
-    args = parser.parse_args()
+    parser.add_argument("--model", choices=("mediapipe", "wilor"), default="mediapipe")
+    parser.add_argument("--wilor-root")
+    parser.add_argument("--wilor-device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--wilor-fast", action="store_true")
+    parser.add_argument("--wilor-batch-size", type=int, choices=range(1, 17), default=2)
+    args = parser.parse_args(argv)
     configure_high_dpi()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -1977,10 +2183,13 @@ def main():
     palette.setColor(QPalette.Highlight, QColor(0, 120, 212))
     palette.setColor(QPalette.HighlightedText, Qt.black)
     app.setPalette(palette)
-    window = StereoHandTrackerGUI(calc_splay=args.calc_splay)
+    window = StereoHandTrackerGUI(
+        calc_splay=args.calc_splay, model=args.model, wilor_root=args.wilor_root,
+        wilor_device=args.wilor_device, wilor_fast=args.wilor_fast,
+        wilor_batch_size=args.wilor_batch_size)
     window.show()
-    sys.exit(app.exec_())
+    return app.exec_()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

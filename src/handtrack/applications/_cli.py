@@ -44,7 +44,7 @@ def _resolve_backend(requested_backend: str) -> str:
     return "webcam"
 
 
-def _run_module_entrypoint(module_name: str) -> int:
+def _run_module_entrypoint(module_name: str, argv=None) -> int:
     module = importlib.import_module(module_name)
     main = getattr(module, "main", None)
     if main is None:
@@ -56,7 +56,7 @@ def _run_module_entrypoint(module_name: str) -> int:
     # ``handtracker`` command (for example, ``gui``) leak into those parsers.
     # The unified CLI has already consumed and validated its arguments here.
     previous_argv = sys.argv
-    sys.argv = [previous_argv[0]]
+    sys.argv = [previous_argv[0], *(argv or [])]
     try:
         result = main()
     finally:
@@ -181,6 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
     gui_parser.add_argument("--advanced-hands", action="store_true", help="use calibrated multi-camera tracking")
     gui_parser.add_argument("--source", default="0", help="camera index or video path")
     gui_parser.add_argument("--mode", choices=("hands", "face", "pose", "holistic"), default="hands")
+    gui_parser.add_argument("--wilor-batch-size", type=int, choices=range(1, 17), default=2,
+                            help="maximum hand crops per shared WiLoR inference batch")
     demo_parser = subparsers.add_parser("demo", help="start tracking with one camera, without calibration")
     demo_parser.add_argument("--source", default="0")
     demo_parser.add_argument("--mode", choices=("hands", "face", "pose", "holistic"), default="hands")
@@ -398,10 +400,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if getattr(args, "model", "mediapipe") == "wilor":
         if args.mode != "hands":
             parser.error("WiLoR supports hands only; use --mode hands")
-        if args.command == "gui" and (args.advanced_hands or args.backend == "optitrack"):
-            parser.error("WiLoR currently supports single-source preview/API; use demo --model wilor")
+        if args.command == "gui" and args.advanced_hands and args.backend == "webcam":
+            parser.error("WiLoR multi-camera GUI currently uses --backend optitrack")
         if args.command == "gui" and args.backend == "auto":
-            args.backend = "webcam"
+            args.backend = "optitrack" if args.advanced_hands else "webcam"
 
     selected_backend = None
     if hasattr(args, "backend"):
@@ -442,6 +444,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "export":
         return _run_export(args)
+
+    if args.command == "gui" and selected_backend == "optitrack":
+        native_args = ["--model", args.model, "--wilor-device", args.wilor_device,
+                       "--wilor-batch-size", str(args.wilor_batch_size)]
+        if args.wilor_root is not None:
+            native_args.extend(["--wilor-root", args.wilor_root])
+        if args.wilor_fast:
+            native_args.append("--wilor-fast")
+        return _run_module_entrypoint(_BACKEND_ENTRYPOINTS["optitrack"]["gui"], native_args)
 
     module_name = _BACKEND_ENTRYPOINTS[selected_backend][args.command]
     return _run_module_entrypoint(module_name)

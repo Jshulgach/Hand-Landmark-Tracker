@@ -182,8 +182,7 @@ def test_cli_forwards_wilor_options_without_optitrack_auto_routing(monkeypatch):
 
 @pytest.mark.parametrize("args", [
     ["demo", "--model", "wilor", "--mode", "pose"],
-    ["gui", "--model", "wilor", "--backend", "optitrack"],
-    ["gui", "--model", "wilor", "--advanced-hands"],
+    ["gui", "--model", "wilor", "--backend", "webcam", "--advanced-hands"],
 ])
 def test_unimplemented_wilor_workflows_are_rejected_instead_of_falling_back(args):
     from handtrack.applications import _cli

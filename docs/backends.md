@@ -135,6 +135,8 @@ reports this separately under `optitrack:illumination`. See the
 ## Optional WiLoR hand model
 
 The optional experimental WiLoR integration provides a frame API and
-single-source mesh/joint preview. Model choice is separate from camera backend.
-See [WiLoR setup and validation status](wilor.md). The advanced OptiTrack GUI
-continues to use MediaPipe; WiLoR multi-camera reconstruction is not yet integrated.
+single-source and OptiTrack multi-camera mesh/joint preview. Model choice is
+separate from camera backend. The OptiTrack grid shares one WiLoR model across
+the feeds and retains exposure/IR controls.
+See [multi-camera setup and validation status](wilor.md#optitrack-multi-camera-gui).
+Calibrated reconstruction remains separate from independent WiLoR camera models.

@@ -55,8 +55,18 @@ environment, obtain MANO and download checksum-verified checkpoints.
 The live Studio model selector can switch between MediaPipe and WiLoR.
 Real CPU inference and a live hand overlay have been checked; RTX 3060 inference,
 fast mode and accuracy benchmarks remain pending. This first integration supports
-single-source hand preview and the frame API. Advanced OptiTrack reconstruction,
-recording and streaming use the existing estimator paths.
+single-source and OptiTrack multi-camera preview plus frame APIs. Multi-camera
+WiLoR uses one shared model and preserves the exposure/IR controls. Calibrated
+reconstruction, recording and streaming use the existing estimator paths.
+
+For all connected OptiTrack cameras:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track gui --backend optitrack --model wilor --wilor-device cuda --wilor-fast
+```
+
+Click **Start Tracking**. See the [multi-camera guide](docs/wilor.md#optitrack-multi-camera-gui)
+for live-feed versus matched-overlay display and validation limits.
 
 ## Include MAVIS in your project
 

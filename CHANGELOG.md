@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add shared-model WiLoR inference and mesh/joint viewing for all connected
+  OptiTrack cameras, independent per-view association, bounded cross-view crop
+  batches, live-feed/matched-frame display and asynchronous startup/shutdown.
+- Preserve exposure/IR controls and camera preview during slow/failed inference;
+  keep per-camera model coordinates separate from calibrated reconstruction.
+- Verify four-view real-model reference rendering on CPU and preserve the existing
+  MediaPipe multi-camera workflows. Physical OptiTrack/RTX validation is pending.
+
 - Add experimental official WiLoR hand inference, a separate frame API with
   explicit pixel/model coordinate spaces, and selectable live mesh/joint preview.
 - Add a pinned Windows/Python 3.11 CUDA-capable runtime installer with verified
