@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Show WiLoR startup stages, elapsed time, selected CPU/CUDA device, completed
+  batches, and zero-detection/raw-preview status. Distinguish model loading from
+  first inference; print initialization/inference exception chains and the
+  interpreter path while preserving live camera feeds.
+
 - Fix OptiTrack stop/start and MediaPipe/WiLoR switching by keeping the SDK
   initialized for the application lifetime. Stop releases capture handles;
   final SDK shutdown happens after workers stop on application exit. Protect

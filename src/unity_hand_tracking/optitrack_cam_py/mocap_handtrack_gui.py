@@ -1279,7 +1279,7 @@ class StereoHandTrackerGUI(QMainWindow):
                     self._wilor_draw_cache[cache_key] = display.copy()
             caption = f"Camera {index}"
             if age is not None:
-                caption += f" | WiLoR frame age {age:.1f}s"
+                caption += f" | WiLoR age {age:.1f}s | hands {len(result.hands) if result else 0}"
             else:
                 caption += " | live"
             cv2.putText(display, caption, (10, 26), cv2.FONT_HERSHEY_SIMPLEX,
@@ -1292,15 +1292,22 @@ class StereoHandTrackerGUI(QMainWindow):
                 self.video_grid.set_image_aspect(width / height)
         self.frame_count += 1
         self.frame_label.setText(f"Frames: {self.frame_count}")
+        device = session.device.upper() if session.device else "device pending"
         if packet is not None:
             count = max((len(result.hands) for result in packet.results if result is not None), default=0)
             self.hands_label.setText(f"Hands/view: {count}")
-            self.fps_label.setText(f"Inference batch: {1/max(packet.inference_seconds,1e-6):.2f} FPS")
-            self.timing_label.setText(f"All-view inference: {packet.inference_seconds*1000:.0f} ms")
+            self.fps_label.setText(f"{device} | Batch: {1/max(packet.inference_seconds,1e-6):.2f} FPS")
+            self.timing_label.setText(
+                f"Batch #{session.completed_batches} | All views: {packet.inference_seconds*1000:.0f} ms")
+            if not error and count == 0:
+                state += " | No hands detected in last batch"
+            if not matched and not error:
+                state += " | Live feeds: overlays off"
         else:
             self.hands_label.setText("Hands/view: --")
-            self.fps_label.setText("WiLoR unavailable" if error else "Loading WiLoR...")
-            self.timing_label.setText("Live camera preview")
+            self.fps_label.setText("WiLoR unavailable" if error else
+                                   f"{device} | {session.stage_seconds:.0f}s in stage")
+            self.timing_label.setText("Live camera preview; no inference result yet")
         self.tracked_hand_label.setText("3D: local")
         self.tracked_hand_label.setToolTip("Independent monocular model coordinates for each camera.")
         self.status_label.setText(f"Status: {error or state}")
