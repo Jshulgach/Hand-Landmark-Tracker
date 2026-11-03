@@ -273,6 +273,23 @@ The display selector has two choices:
 - **Live camera feeds** refreshes current video independently while inference
   runs. Old joints are never painted onto a newer raw frame.
 
+The status panel shows each startup stage and elapsed time, including imports,
+checkpoint loading, transfer to CPU/CUDA, and the first inference batch. Camera
+video can appear before the model is ready. A first launch may take substantially
+longer than subsequent batches; moving camera video alone does not confirm
+inference. After the first result, check the CPU/CUDA indicator, completed batch
+counter, inference timing, and hand counts. Zero detections are reported explicitly.
+Select **Mesh overlays (matched frames)** to see results; **Live camera feeds**
+shows current raw video and reports that overlays are off.
+
+If startup stops progressing, the terminal's last `[WiLoR]` stage identifies where.
+Initialization/inference exceptions include their traceback and Python executable
+in the terminal while the live preview remains available. To check GPU detection:
+
+```powershell
+./.venv-wilor/Scripts/python.exe -c "import torch; print(torch.__version__); print('CUDA:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
 Feeds also remain visible during model loading, and remain available if model
 initialization or inference fails. A disconnected/stale camera clears its tile.
 Stop/close is asynchronous: the GUI stays responsive while the current native

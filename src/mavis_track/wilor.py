@@ -10,7 +10,7 @@ import importlib
 import os
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -123,7 +123,9 @@ def _detector_class(root: Path):
 class _OfficialWiLoR:
     """Own heavyweight dependencies and models only when explicitly selected."""
 
-    def __init__(self, root: Path, device: str, fast: bool):
+    def __init__(self, root: Path, device: str, fast: bool,
+                 progress: Callable[[str], None] | None = None):
+        report = progress if progress is not None else (lambda stage: None)
         # The upstream renderer defaults to Linux EGL even on Windows. We do
         # not create its renderers; the live overlay uses OpenCV instead.
         if sys.platform == "win32":
@@ -138,7 +140,9 @@ class _OfficialWiLoR:
         if inserted:
             sys.path.insert(0, source)
         try:
+            report("Importing PyTorch")
             torch = importlib.import_module("torch")
+            report("Importing WiLoR dependencies")
             YOLO = _detector_class(root)
             WiLoR = importlib.import_module("wilor.models").WiLoR
             get_config = importlib.import_module("wilor.configs").get_config
@@ -156,6 +160,7 @@ class _OfficialWiLoR:
             raise RuntimeError("CUDA requested but this PyTorch installation cannot use an NVIDIA GPU")
         if fast and self.device != "cuda":
             raise ValueError("WiLoR fast mode requires CUDA; omit --wilor-fast on CPU")
+        report(f"Preparing WiLoR on {self.device.upper()}")
         cfg = get_config(str(root / "pretrained_models/model_config.yaml"))
         cfg.defrost()
         if "vit" in cfg.MODEL.BACKBONE.TYPE and "BBOX_SHAPE" not in cfg.MODEL:
@@ -166,13 +171,17 @@ class _OfficialWiLoR:
         cfg.MANO.MEAN_PARAMS = str(root / "mano_data/mano_mean_params.npz")
         cfg.freeze()
         self.cfg = cfg
+        report("Loading reconstruction checkpoint")
         self.model = WiLoR.load_from_checkpoint(
             str(root / "pretrained_models/wilor_final.ckpt"),
             map_location="cpu", strict=False, cfg=cfg, init_renderer=False)
+        report(f"Moving reconstruction model to {self.device.upper()}")
         self.model = self.model.to(self.device).eval()
+        report(f"Loading hand detector on {self.device.upper()}")
         self.detector = YOLO(str(root / "pretrained_models/detector.pt")).to(self.device)
         self.fast = fast
         if fast:
+            report("Enabling CUDA fast mode")
             self.model = self.model.half()
             self.model.backbone.skip_blocks = True
         self.faces = np.array(self.model.mano.faces, dtype=np.int32, copy=True)
@@ -256,11 +265,14 @@ class WiLoRTracker:
     a wrist-relative origin, and MANO model scale; absolute position/scale are
     monocular estimates using WiLoR's assumed focal length, not calibration.
     Track IDs associate adjacent frames only and do not identify a person.
+    An optional progress callback receives startup stages on the calling thread;
+    it should return promptly and must not directly update GUI widgets.
     """
 
     def __init__(self, *, root: str | Path | None = None, device: str = "auto",
                  fast: bool = False, max_hands: int = 2, confidence: float = 0.3,
-                 mirrored: bool = False, source_id: str = "frames"):
+                 mirrored: bool = False, source_id: str = "frames",
+                 progress: Callable[[str], None] | None = None):
         if device not in ("auto", "cpu", "cuda"):
             raise ValueError("device must be auto, cpu, or cuda")
         if type(fast) is not bool or type(mirrored) is not bool:
@@ -269,13 +281,17 @@ class WiLoRTracker:
             raise ValueError("max_hands must be 1 or 2")
         if not np.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("confidence must be between 0 and 1")
+        if progress is not None and not callable(progress):
+            raise TypeError("progress must be callable or None")
         folder = wilor_root(root)
         missing = missing_assets(folder)
         if missing:
             raise FileNotFoundError(
                 f"WiLoR assets missing in {folder}: {', '.join(missing)}. "
                 "See docs/wilor.md; obtain MANO_RIGHT.pkl from the MANO website.")
-        self._runtime: _OfficialWiLoR | None = _OfficialWiLoR(folder, device, fast)
+        self._runtime: _OfficialWiLoR | None = (
+            _OfficialWiLoR(folder, device, fast, progress=progress) if progress is not None
+            else _OfficialWiLoR(folder, device, fast))
         self.faces = self._runtime.faces
         self.device = self._runtime.device
         self.max_hands, self.confidence = max_hands, confidence

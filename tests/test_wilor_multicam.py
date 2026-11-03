@@ -41,10 +41,12 @@ def models(monkeypatch, tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     state = SimpleNamespace(loads=0, closes=0, batches=[], load_gate=None,
-                            infer_gate=None, entered=threading.Event(), fail=False)
+                            infer_gate=None, entered=threading.Event(), fail=False, empty=False)
     class Runtime:
-        def __init__(self, root, device, fast):
+        def __init__(self, root, device, fast, progress=None):
             state.loads += 1
+            if progress:
+                progress("Loading reconstruction checkpoint")
             self.faces = np.array([[0, 1, 2]], np.int32)
             self.device = "cpu"
             self.cfg = SimpleNamespace(EXTRA=SimpleNamespace(FOCAL_LENGTH=5000),
@@ -59,6 +61,8 @@ def models(monkeypatch, tmp_path):
                 assert state.infer_gate.wait(5)
             if state.fail:
                 raise RuntimeError("CUDA inference failed")
+            if state.empty:
+                return [[] for image in images]
             results = []
             for image in images:
                 h, w = image.shape[:2]
@@ -182,6 +186,8 @@ def test_four_live_tiles_and_controls_work_during_blocked_model_load(models, cam
         manager = cameras.managers[0]
         count = manager.counter
         wait_until(lambda: len(ticks) >= 8 and manager.counter > count + 2, app)
+        assert "Loading reconstruction checkpoint" in window.status_label.text()
+        assert "stage" in window.fps_label.text()
         assert not window.show_3d_checkbox.isEnabled()
         assert not window.udp_checkbox.isEnabled()
         window.exposure_spinboxes[2].setValue(25)
@@ -439,3 +445,83 @@ def test_mediapipe_wilor_switches_reopen_four_cameras_without_terminal_sdk_shutd
         wait_until(lambda: window._wilor_session is None, app)
         capture_runtime(sdk).close()
     assert sdk.shutdowns == 1
+
+
+def test_first_inference_is_not_reported_as_model_loading(models, cameras, app):
+    root, model_state = models
+    gate = threading.Event()
+    model_state.infer_gate = gate
+    window = gui.StereoHandTrackerGUI(model="wilor", wilor_root=root)
+    try:
+        window.show()
+        window.start_tracking()
+        wait_until(model_state.entered.is_set, app)
+        wait_until(lambda: "First inference batch" in window.status_label.text(), app)
+        assert window._wilor_session.device == "cpu"
+        assert window._wilor_session.completed_batches == 0
+        assert "CPU" in window.fps_label.text()
+        assert "Loading" not in window.fps_label.text()
+        assert "no inference result yet" in window.timing_label.text()
+        assert all(label.pixmap() is not None for label in window.video_labels)
+        gate.set()
+        wait_until(lambda: "Batch #" in window.timing_label.text(), app)
+        assert window._wilor_session.completed_batches >= 1
+        assert "CPU" in window.fps_label.text()
+    finally:
+        gate.set()
+        window.close()
+        wait_until(lambda: window._wilor_session is None, app)
+
+
+def test_completed_zero_detection_batches_and_raw_display_are_explicit(models, cameras, app):
+    root, model_state = models
+    model_state.empty = True
+    window = gui.StereoHandTrackerGUI(model="wilor", wilor_root=root)
+    try:
+        window.show()
+        window.start_tracking()
+        wait_until(lambda: "No hands detected" in window.status_label.text(), app)
+        assert window.hands_label.text() == "Hands/view: 0"
+        assert "Batch #" in window.timing_label.text()
+        assert "Loading" not in window.fps_label.text()
+        window.wilor_view_combo.setCurrentIndex(1)
+        wait_until(lambda: "overlays off" in window.status_label.text(), app)
+    finally:
+        window.close()
+        wait_until(lambda: window._wilor_session is None, app)
+
+
+def test_model_load_failure_prints_exception_chain_and_interpreter(cameras, monkeypatch, capsys):
+    import sys
+    def fail(**options):
+        options["progress"]("Loading reconstruction checkpoint")
+        try:
+            raise ImportError("missing_example_dependency")
+        except ImportError as exc:
+            raise RuntimeError("WiLoR initialization failed") from exc
+    monkeypatch.setattr(sessions, "WiLoRMultiViewTracker", fail)
+    session = sessions.WiLoRCameraSession()
+    session.start()
+    try:
+        wait_until(lambda: session.error is not None)
+        assert session.ready.is_set() and session.is_alive()
+        assert session.completed_batches == 0 and session.device is None
+        assert all(frame is not None for frame, _ in session.raw_snapshots())
+    finally:
+        session.request_stop()
+        session.join(5)
+    output = capsys.readouterr()
+    assert "Loading reconstruction checkpoint" in output.out
+    assert sys.executable in output.err
+    assert "missing_example_dependency" in output.err
+    assert "WiLoR initialization failed" in output.err
+    assert "Traceback" in output.err
+
+
+def test_api_forwards_optional_startup_progress(models):
+    root, _ = models
+    stages = []
+    with WiLoRMultiViewTracker(root=root, progress=stages.append):
+        assert stages == ["Loading reconstruction checkpoint"]
+    with pytest.raises(TypeError, match="progress"):
+        WiLoRMultiViewTracker(root=root, progress="not a callback")
