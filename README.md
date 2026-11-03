@@ -52,6 +52,14 @@ environment, obtain MANO and download checksum-verified checkpoints.
 ./.venv-wilor/Scripts/python.exe -m mavis_track demo --model wilor
 ```
 
+For the RTX PC, after placing your licensed `MANO_RIGHT.pkl` in
+`external/WiLoR/mano_data/`, one command prepares the source, checkpoints and
+isolated environment while preserving existing assets:
+
+```powershell
+py -3.11 scripts/setup_wilor.py --setup --require-cuda
+```
+
 The live Studio model selector can switch between MediaPipe and WiLoR.
 Real CPU inference and a live hand overlay have been checked; RTX 3060 inference,
 fast mode and accuracy benchmarks remain pending. This first integration supports

@@ -1,7 +1,8 @@
 """Prepare the optional WiLoR source, verified checkpoints and isolated runtime.
 
 Examples (Windows, Python 3.11):
-    python scripts/setup_wilor.py --prepare-source --download-checkpoints --install
+    python scripts/setup_wilor.py --setup --require-cuda
+    python scripts/setup_wilor.py --prepare-source
     python scripts/setup_wilor.py --check --require-cuda
 
 MANO_RIGHT.pkl must be obtained separately by the user under the MANO license.
@@ -16,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import venv
 from pathlib import Path
 
@@ -42,22 +44,109 @@ def _run(command, *, env=None):
     subprocess.run([str(value) for value in command], check=True, cwd=REPO, env=env)
 
 
-def prepare_source(root: Path):
-    print("Preparing WiLoR source with Git (no Python packages are installed).", flush=True)
-    if root.exists():
-        if not (root / ".git").is_dir():
-            raise RuntimeError(f"Existing directory preserved: {root}; expected a WiLoR Git checkout")
-        revision = subprocess.check_output(
-            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-        if revision != SOURCE_REVISION:
-            raise RuntimeError(f"Different WiLoR revision preserved: {revision}; expected {SOURCE_REVISION}")
-        print(f"WiLoR source already at {revision}", flush=True)
-        return
-    root.parent.mkdir(parents=True, exist_ok=True)
+def _clone_source(root: Path):
     _run(["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", SOURCE_URL, root])
     _run(["git", "-C", root, "sparse-checkout", "set", "wilor", "mano_data", "pretrained_models"])
     _run(["git", "-C", root, "fetch", "--depth", "1", "origin", SOURCE_REVISION])
     _run(["git", "-C", root, "checkout", "--detach", SOURCE_REVISION])
+    revision = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    if revision != SOURCE_REVISION:
+        raise RuntimeError("The downloaded WiLoR source did not match the pinned revision")
+
+
+def _source_destination(root: Path, relative: Path) -> Path:
+    destination = root / relative
+    if not destination.resolve().is_relative_to(root):
+        raise RuntimeError(f"Redirected source destination refused: {destination}")
+    for path in (destination, *destination.parents):
+        if path == root:
+            break
+        if path.is_symlink():
+            raise RuntimeError(f"Symlink preserved: {path}")
+        if path != destination and path.exists() and not path.is_dir():
+            raise RuntimeError(f"Conflicting existing file preserved: {path}")
+    return destination
+
+
+def _merge_source(checkout: Path, root: Path, *, keep_metadata: bool):
+    pending = []
+    # Check every destination before copying anything. Only files materialized
+    # by the sparse checkout are merged; private assets are never moved.
+    for source in sorted(checkout.rglob("*")):
+        relative = source.relative_to(checkout)
+        if relative.parts[0] == ".git":
+            continue
+        destination = _source_destination(root, relative)
+        if source.is_symlink():
+            raise RuntimeError(f"Unexpected upstream symlink: {relative}")
+        if source.is_dir():
+            if destination.exists() and not destination.is_dir():
+                raise RuntimeError(f"Conflicting existing file preserved: {destination}")
+            continue
+        if destination.exists():
+            if not destination.is_file() or sha256(source) != sha256(destination):
+                raise RuntimeError(f"Different existing source file preserved: {destination}")
+        else:
+            pending.append((source, destination))
+    metadata = _source_destination(root, Path(".git"))
+    if not keep_metadata and metadata.exists():
+        raise RuntimeError(f"Existing Git metadata preserved: {metadata}")
+    created = []
+    try:
+        for source, destination in pending:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("xb") as output:
+                created.append(destination)
+                with source.open("rb") as incoming:
+                    shutil.copyfileobj(incoming, output)
+            shutil.copymode(source, destination)
+        if not keep_metadata:
+            source_metadata = checkout / ".git"
+            # Both absolute targets are checked before moving the metadata.
+            # The sibling staging directory keeps this a same-volume rename.
+            if (source_metadata.resolve().parent != checkout.resolve()
+                    or metadata.resolve().parent != root or not source_metadata.is_dir()):
+                raise RuntimeError("Unexpected Git metadata location")
+            if metadata.exists():
+                raise RuntimeError(f"Existing Git metadata preserved: {metadata}")
+            os.rename(source_metadata, metadata)
+    except BaseException:  # Roll back only files created by this attempt, including on Ctrl-C.
+        for destination in reversed(created):
+            _source_destination(root, destination.relative_to(root)).unlink(missing_ok=True)
+        raise
+
+
+def prepare_source(root: Path):
+    print("Preparing WiLoR source with Git (existing MANO/checkpoints stay in place).", flush=True)
+    if root.is_symlink() or (root.exists() and not root.is_dir()):
+        raise RuntimeError(f"Existing source path preserved: {root}")
+    root = root.resolve()
+    metadata = _source_destination(root, Path(".git"))
+    keep_metadata = metadata.is_dir()
+    if metadata.exists() and not keep_metadata:
+        raise RuntimeError(f"Existing Git metadata preserved: {metadata}")
+    if keep_metadata:
+        revision = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+        if revision != SOURCE_REVISION:
+            raise RuntimeError(f"Different WiLoR revision preserved: {revision}; expected {SOURCE_REVISION}")
+        required = ("wilor/models/wilor.py", "pretrained_models/model_config.yaml",
+                    "mano_data/mano_mean_params.npz")
+        if all((root / name).is_file() and (root / name).stat().st_size for name in required):
+            print(f"WiLoR source already at {revision}; no source download needed", flush=True)
+            return
+    root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mavis-wilor-source-", dir=root.parent) as temporary:
+        staging = Path(temporary).resolve()
+        # Validate the exact generated staging path before automatic recursive
+        # cleanup, including when cloning or merging fails.
+        if staging.parent != root.parent or not staging.name.startswith(".mavis-wilor-source-"):
+            raise RuntimeError("Unexpected source staging directory")
+        checkout = staging / "checkout"
+        _clone_source(checkout)
+        _merge_source(checkout, root, keep_metadata=keep_metadata)
+    print(f"WiLoR source prepared at {SOURCE_REVISION}; existing assets preserved", flush=True)
 
 
 def download_checkpoint(folder: Path, name: str, size: int, digest: str, curl: str):
@@ -114,11 +203,15 @@ def environment_paths():
     return folder, folder / "Scripts/python.exe"
 
 
-def install_environment(installer="auto"):
+def _require_runtime_python():
     if sys.platform != "win32" or sys.version_info[:2] != (3, 11):
         raise RuntimeError("This runtime lock requires 64-bit Windows CPython 3.11")
     if sys.maxsize <= 2**32:
         raise RuntimeError("64-bit Python is required")
+
+
+def install_environment(installer="auto"):
+    _require_runtime_python()
     folder, python = environment_paths()
     if folder.exists():
         config = folder / "pyvenv.cfg"
@@ -148,7 +241,7 @@ def install_environment(installer="auto"):
               "--index-strategy", "unsafe-best-match",
               "--no-build-isolation-package", "chumpy", "-r", lock], env=runtime_env)
         _run([uv, "--native-tls", "pip", "install", "--python", python,
-              "--no-deps", "-e", REPO], env=runtime_env)
+              "--no-deps", "--no-build-isolation", "-e", REPO], env=runtime_env)
     else:
         # Fresh Python 3.11 environments can contain pip 23.1, which cannot
         # enable truststore before that package is installed. Bootstrap with
@@ -158,7 +251,7 @@ def install_environment(installer="auto"):
               "--upgrade", *BOOTSTRAP], env=runtime_env)
         _run([python, "-m", "pip", "install", "--no-build-isolation",
               "-r", lock], env=runtime_env)
-        _run([python, "-m", "pip", "install", "--no-deps", "-e", REPO], env=runtime_env)
+        _run([python, "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", REPO], env=runtime_env)
     _run([python, "-m", "pip", "check"], env=runtime_env)
     print(f"Isolated runtime installed: {folder}", flush=True)
 
@@ -188,6 +281,8 @@ print("CUDA tensor operation passed")
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO / "external/WiLoR")
+    parser.add_argument("--setup", action="store_true",
+                        help="prepare source, reuse/download checkpoints, install and check .venv-wilor")
     parser.add_argument("--prepare-source", action="store_true")
     parser.add_argument("--download-checkpoints", action="store_true")
     parser.add_argument("--install", action="store_true")
@@ -197,6 +292,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     root = args.root.expanduser().resolve()
     try:
+        if args.setup:
+            _require_runtime_python()
+            mano = root / "mano_data/MANO_RIGHT.pkl"
+            if not mano.is_file() or mano.stat().st_size == 0:
+                raise RuntimeError(f"Place your licensed MANO_RIGHT.pkl at {mano} before --setup")
+            args.prepare_source = args.download_checkpoints = args.install = True
         if args.prepare_source:
             prepare_source(root)
         if args.download_checkpoints:
