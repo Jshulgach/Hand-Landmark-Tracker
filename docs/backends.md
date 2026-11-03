@@ -49,10 +49,21 @@ the GUI shows a calibration notice and keeps the feeds running. It disables the
 3D view, reconstruction controls, and reconstructed joint angles; existing
 UDP/LSL streams report unavailable hands rather than fabricated 3D observations.
 
-To enable 3D, stop preview to release the cameras, run
-`mavis-track calibrate --backend optitrack`, then start tracking again. Each start
+To enable 3D, close the tracking GUI, run
+`mavis-track calibrate --backend optitrack`, then reopen the GUI. Each start
 validates the saved calibration against the connected camera count, identities
 when available, and image sizes before enabling reconstruction.
+
+Within the GUI, **Stop Tracking → select model → Start Tracking** is supported.
+Stopping joins the capture workers and releases camera handles. The shared
+OptiTrack SDK stays initialized until the application exits, so MediaPipe and
+WiLoR can reopen the cameras without attempting to restart a shut-down native
+singleton. Start/model selection remains blocked while WiLoR finishes stopping.
+Only one capture session can own the cameras at a time.
+
+Close MAVIS completely before using a separate calibration or vendor camera
+application. After updating an older GUI that already reported zero cameras on
+restart, fully close and relaunch it once to load the corrected SDK lifetime.
 
 The optional OptiTrack path uses `optitrack_cam` and a separately obtained
 Windows Camera SDK. Source installations discover the local

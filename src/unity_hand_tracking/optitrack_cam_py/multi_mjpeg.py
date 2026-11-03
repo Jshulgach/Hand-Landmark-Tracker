@@ -25,6 +25,7 @@ import threading
 import time
 
 from mavis_track._capture import FrameBuffer, snapshots
+from mavis_track._optitrack_runtime import capture_runtime, shutdown_capture_sdks
 
 import cv2
 import numpy as np
@@ -156,16 +157,24 @@ class CameraManager:
                 "(Windows x64 / Python 3.11), then restart MAVIS. "
                 "For another compatible binding, set OPTITRACK_CAM_PY_PATH to its folder."
             )
-        print("Initializing OptiTrack SDK...")
-        optitrack_cam.initialize_sdk()
-        time.sleep(discovery_wait)
-
-        self.num_cameras = optitrack_cam.camera_count()
-        print(f"Detected {self.num_cameras} cameras.")
-
         self.workers: list[CameraWorker] = []
-        self._shutdown = False
-        self.camera_indices = list(range(self.num_cameras))
+        self._shutdown = False  # Capture stopped; the process SDK remains alive.
+        self._stop_lock = threading.RLock()
+        self.num_cameras = 0
+        self.camera_indices = []
+        self._runtime = capture_runtime(optitrack_cam)
+        with self._stop_lock:
+            fresh = self._runtime.acquire(self)
+            try:
+                print("Initializing OptiTrack SDK..." if fresh else "Reusing OptiTrack SDK...")
+                time.sleep(discovery_wait)
+                self.num_cameras = optitrack_cam.camera_count()
+                self.camera_indices = list(range(self.num_cameras))
+                print(f"Detected {self.num_cameras} cameras.")
+            except BaseException:
+                self._shutdown = True
+                self._runtime.release(self)
+                raise
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -176,7 +185,13 @@ class CameraManager:
         acquisition_rounds: int = 10,
         retry_delay: float = 0.5,
     ):
-        """Create and start a CameraWorker for every detected camera."""
+        """Create and start workers while holding the exclusive capture lease."""
+        with self._stop_lock:
+            if self._shutdown:
+                raise RuntimeError("This camera session is stopped; create a new CameraManager")
+            return self._start_all(exposure, mjpeg_mode, acquisition_rounds, retry_delay)
+
+    def _start_all(self, exposure, mjpeg_mode, acquisition_rounds, retry_delay):
         if self.workers:
             return self.workers
 
@@ -210,13 +225,20 @@ class CameraManager:
                 "missing cameras, wait a few seconds, and try again."
             )
 
-        for index in range(self.num_cameras):
-            worker = CameraWorker(
-                handles[index], index, exposure=exposure, mjpeg_mode=mjpeg_mode
-            )
-            worker.start()
-            self.workers.append(worker)
-            print(f"Started worker for Camera {index}")
+        unstarted = dict(handles)
+        try:
+            for index in range(self.num_cameras):
+                worker = CameraWorker(
+                    handles[index], index, exposure=exposure, mjpeg_mode=mjpeg_mode
+                )
+                worker.start()
+                self.workers.append(worker)
+                del unstarted[index]
+                print(f"Started worker for Camera {index}")
+        except BaseException:
+            for camera in unstarted.values():
+                camera.release()
+            raise
 
         return self.workers
 
@@ -226,42 +248,50 @@ class CameraManager:
                 raise RuntimeError(f"{worker.name} did not supply a frame: {worker.error}")
 
     def stop_all(self):
-        """Stop every worker and shut down the SDK."""
-        if self._shutdown:
-            return
-        print("Shutting down workers...")
-        for w in self.workers:
-            w.stop()
-        for w in self.workers:
-            w.join(timeout=3)
-        alive = [worker.name for worker in self.workers if worker.is_alive()]
-        if alive:
-            raise RuntimeError(f"Camera workers did not stop: {alive}")
-        optitrack_cam.shutdown_sdk()
-        self._shutdown = True
-        self.workers.clear()
-        print("Cleanup complete.")
+        """Stop/release capture handles; retain the SDK for the next session."""
+        with self._stop_lock:
+            if self._shutdown:
+                return
+            print("Stopping camera workers...")
+            for worker in self.workers:
+                worker.stop()
+            for worker in self.workers:
+                worker.join(timeout=3)
+            alive = [worker.name for worker in self.workers if worker.is_alive()]
+            if alive:
+                # Keep ownership: another model must not reopen the cameras
+                # or shut down the SDK underneath capture still in flight.
+                raise RuntimeError(f"Camera workers did not stop: {alive}")
+            self._shutdown = True
+            self.workers.clear()
+            self._runtime.release(self)
+            print("Camera capture cleanup complete.")
 
     # -- frame access -------------------------------------------------------
 
     def set_exposure(self, cam_index: int, value: int):
         """Set exposure for a specific camera at runtime."""
-        if 0 <= cam_index < len(self.workers):
-            self.workers[cam_index].set_exposure(value)
+        with self._stop_lock:
+            if not self._shutdown and 0 <= cam_index < len(self.workers):
+                self.workers[cam_index].set_exposure(value)
 
     def _illumination_camera(self, cam_index):
+        if self._shutdown:
+            raise RuntimeError("Camera capture session is stopped")
         if type(cam_index) is not int or not 0 <= cam_index < len(self.workers):
             raise ValueError("Camera index is outside the active capture session")
         return self.workers[cam_index].camera
 
     def get_illumination(self, cam_index):
         from mavis_track._illumination import read_illumination
-        return read_illumination(self._illumination_camera(cam_index))
+        with self._stop_lock:
+            return read_illumination(self._illumination_camera(cam_index))
 
     def set_illumination(self, cam_index, *, intensity=None, high_power=None, maximize=False):
         from mavis_track._illumination import set_illumination
-        return set_illumination(self._illumination_camera(cam_index), intensity=intensity,
-                                high_power=high_power, maximize=maximize)
+        with self._stop_lock:
+            return set_illumination(self._illumination_camera(cam_index), intensity=intensity,
+                                    high_power=high_power, maximize=maximize)
 
     def get_frame(self, cam_index: int):
         """Return the latest BGR frame from a specific camera."""
@@ -354,6 +384,8 @@ def main():
     mgr = CameraManager()
     if mgr.num_cameras == 0:
         print("No cameras found. Exiting.")
+        mgr.stop_all()
+        shutdown_capture_sdks()
         return
 
     mgr.start_all()
@@ -370,6 +402,7 @@ def main():
                 break
     finally:
         mgr.stop_all()
+        shutdown_capture_sdks()
         cv2.destroyAllWindows()
 
 

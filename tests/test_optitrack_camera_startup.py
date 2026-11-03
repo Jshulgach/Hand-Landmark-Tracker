@@ -19,9 +19,19 @@ class _FakeWorker:
         self.camera = camera
         self.index = index
         self.started = False
+        self.name = f'Fake camera {index}'
 
     def start(self):
         self.started = True
+
+    def stop(self):
+        self.camera.release()
+
+    def join(self, timeout=None):
+        pass
+
+    def is_alive(self):
+        return False
 
 
 class _DelayedCameraSdk:
@@ -36,6 +46,9 @@ class _DelayedCameraSdk:
     def initialize_sdk(self):
         return None
 
+    def shutdown_sdk(self):
+        return None
+
     def camera_count(self):
         return self._camera_count
 
@@ -44,6 +57,16 @@ class _DelayedCameraSdk:
         if index in self.never_ready or self.calls[index] < 2:
             return None
         return self.cameras[index]
+
+
+
+@pytest.fixture(autouse=True)
+def close_fake_capture(monkeypatch):
+    yield
+    sdk = multi_mjpeg.optitrack_cam
+    if isinstance(sdk, _DelayedCameraSdk):
+        from mavis_track._optitrack_runtime import capture_runtime
+        capture_runtime(sdk).close()
 
 
 def test_optitrack_uses_core_backend_calibration_file():
@@ -84,3 +107,24 @@ def test_camera_start_fails_before_workers_start_when_a_handle_is_missing(
     assert manager.workers == []
     assert sdk.cameras[0].released
     assert sdk.cameras[2].released
+
+
+
+def test_partial_worker_start_releases_unstarted_handles_and_can_stop(monkeypatch):
+    sdk = _DelayedCameraSdk()
+    class Worker(_FakeWorker):
+        def __init__(self, camera, index, exposure, mjpeg_mode):
+            super().__init__(camera, index, exposure, mjpeg_mode)
+            if index == 1:
+                raise RuntimeError("worker startup failed")
+    monkeypatch.setattr(multi_mjpeg, "optitrack_cam", sdk)
+    monkeypatch.setattr(multi_mjpeg, "CameraWorker", Worker)
+    manager = multi_mjpeg.CameraManager(discovery_wait=0)
+    with pytest.raises(RuntimeError, match="worker startup failed"):
+        manager.start_all(acquisition_rounds=2, retry_delay=0)
+    assert not sdk.cameras[0].released
+    assert sdk.cameras[1].released and sdk.cameras[2].released
+    manager.stop_all()
+    assert all(camera.released for camera in sdk.cameras.values())
+    replacement = multi_mjpeg.CameraManager(discovery_wait=0)
+    replacement.stop_all()

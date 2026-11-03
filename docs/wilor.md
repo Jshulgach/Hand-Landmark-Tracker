@@ -278,6 +278,13 @@ initialization or inference fails. A disconnected/stale camera clears its tile.
 Stop/close is asynchronous: the GUI stays responsive while the current native
 inference finishes, then the model/cameras are released before another start.
 
+The normal model-switch sequence is **Stop Tracking → select MediaPipe/WiLoR →
+Start Tracking**. Camera workers release their handles before the next model
+starts; the native SDK stays initialized until the application exits. This
+avoids shutting down its global singleton on each model switch. Close/relaunch
+an already running GUI after pulling this fix. Close the GUI before opening a
+separate calibration or vendor camera application.
+
 Each view's 3D is a separate monocular model estimate. This mode does not create
 a global reconstructed skeleton, use the saved calibration, or publish fabricated
 3D streams. Saved calibration files are preserved; the MediaPipe path retains

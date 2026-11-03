@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix OptiTrack stop/start and MediaPipe/WiLoR switching by keeping the SDK
+  initialized for the application lifetime. Stop releases capture handles;
+  final SDK shutdown happens after workers stop on application exit. Protect
+  ownership during shutdown and clean up handles after partial startup failures.
+
+
 - Add one-command WiLoR setup with --setup. Source preparation can merge into a
   folder containing a licensed MANO file and checkpoints, preserving existing
   assets, rejecting conflicting source files, and cleaning failed preparation.

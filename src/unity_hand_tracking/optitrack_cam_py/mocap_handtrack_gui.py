@@ -2188,7 +2188,11 @@ def main(argv=None):
         wilor_device=args.wilor_device, wilor_fast=args.wilor_fast,
         wilor_batch_size=args.wilor_batch_size)
     window.show()
-    return app.exec_()
+    try:
+        return app.exec_()
+    finally:
+        from mavis_track._optitrack_runtime import shutdown_capture_sdks
+        shutdown_capture_sdks()
 
 
 if __name__ == "__main__":
