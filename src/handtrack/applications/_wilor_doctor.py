@@ -8,7 +8,7 @@ import sys
 from mavis_track.wilor import missing_assets, wilor_root
 
 
-def run(root=None):
+def run(root=None, *, backend="webcam", gui=False):
     folder = wilor_root(root)
     print(f"python          : {sys.version.split()[0]}")
     print(f"executable      : {sys.executable}")
@@ -45,5 +45,11 @@ def run(root=None):
         except (OSError, RuntimeError) as exc:
             print(f"wilor:device    : probe failed ({exc})")
             ready = False
+    if gui or backend in ("optitrack", "auto"):
+        from ._doctor import main as base_doctor
+        base_args = ["--backend", backend]
+        if gui:
+            base_args.append("--gui")
+        ready &= base_doctor(base_args) == 0
     print("wilor:inference : not tested (this check does not load model weights)")
     return 0 if ready else 1

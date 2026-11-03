@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a private WiLoR offline transfer kit with verified wheels/assets, local-only
+  installation and a real inference/GUI audit. Disable detector connectivity
+  probes, honor WiLoR doctor GUI/backend flags, and discover assets/SDK beside
+  a project-local environment for wheel installs.
+
+
 - Fix WiLoR's pip bootstrap on fresh Python 3.11 environments: upgrade pip before
   using its built-in system certificate support, without requiring an
   uninstalled truststore feature. Show the target interpreter during setup.

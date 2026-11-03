@@ -395,7 +395,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "doctor" and args.model == "wilor":
         from ._wilor_doctor import run
-        return run(args.wilor_root)
+        return run(args.wilor_root, backend=_resolve_backend(args.backend), gui=args.gui)
 
     if getattr(args, "model", "mediapipe") == "wilor":
         if args.mode != "hands":

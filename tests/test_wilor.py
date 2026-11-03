@@ -206,6 +206,7 @@ def test_wilor_doctor_reports_missing_assets_without_loading_checkpoints(monkeyp
 def test_detector_loader_disables_unscoped_installs_and_sync_even_if_preloaded(monkeypatch, tmp_path):
     settings = {"sync": True}
     checks = SimpleNamespace(AUTOINSTALL=True)
+    utils = SimpleNamespace(ONLINE=True)
     detector = object()
     imported = []
     def load(name):
@@ -213,6 +214,8 @@ def test_detector_loader_disables_unscoped_installs_and_sync_even_if_preloaded(m
         imported.append(name)
         if name == "ultralytics":
             return SimpleNamespace(YOLO=detector, settings=settings)
+        if name == "ultralytics.utils":
+            return utils
         assert name == "ultralytics.utils.checks"
         return checks
     monkeypatch.setenv("YOLO_AUTOINSTALL", "true")
@@ -220,5 +223,39 @@ def test_detector_loader_disables_unscoped_installs_and_sync_even_if_preloaded(m
     monkeypatch.setattr(wilor.importlib, "import_module", load)
     assert wilor._detector_class(tmp_path) is detector
     assert checks.AUTOINSTALL is False and settings["sync"] is False
+    assert utils.ONLINE is False and os.environ["YOLO_OFFLINE"] == "true"
     assert os.environ["YOLO_CONFIG_DIR"] == str(tmp_path / ".mavis-runtime")
-    assert imported == ["ultralytics", "ultralytics.utils.checks"]
+    assert imported == ["ultralytics", "ultralytics.utils", "ultralytics.utils.checks"]
+
+
+
+def test_wilor_doctor_cli_keeps_requested_backend_and_gui(monkeypatch):
+    from handtrack.applications import _cli, _wilor_doctor
+    calls = []
+    monkeypatch.setattr(_wilor_doctor, "run", lambda root, **kwargs: calls.append((root, kwargs)) or 1)
+    assert _cli.main(["doctor", "--model", "wilor", "--backend", "optitrack",
+                      "--gui", "--wilor-root", "assets"]) == 1
+    assert calls == [("assets", {"backend": "optitrack", "gui": True})]
+
+
+
+def test_wheel_install_finds_assets_beside_project_environment(monkeypatch, tmp_path):
+    environment = tmp_path / ".venv-wilor"
+    monkeypatch.setattr(sys, "prefix", str(environment))
+    monkeypatch.setattr(wilor, "__file__", str(environment / "Lib/site-packages/mavis_track/wilor.py"))
+    monkeypatch.delenv("MAVIS_WILOR_ROOT", raising=False)
+    expected = tmp_path / "external/WiLoR"
+    source = expected / "wilor/models/wilor.py"
+    source.parent.mkdir(parents=True)
+    source.touch()
+    assert wilor.wilor_root() == expected
+
+
+
+def test_wilor_auto_doctor_does_not_require_unavailable_optitrack(monkeypatch):
+    from handtrack.applications import _cli, _wilor_doctor
+    calls = []
+    monkeypatch.setattr(_cli, "_optitrack_sdk_available", lambda: False)
+    monkeypatch.setattr(_wilor_doctor, "run", lambda root, **kwargs: calls.append(kwargs) or 0)
+    assert _cli.main(["doctor", "--model", "wilor"]) == 0
+    assert calls == [{"backend": "webcam", "gui": False}]

@@ -13,6 +13,11 @@ def sdk_search_paths(src_root: Path, configured: str = "") -> list[Path]:
     checkout = src_root.parent
     if (checkout / "pyproject.toml").is_file():
         paths.append(checkout / "external" / "optitrack-sdk-1.10" / "runtime")
+    # Wheel installs in a project-local venv can keep the SDK beside it.
+    if src_root.resolve().is_relative_to(Path(sys.prefix).resolve()):
+        adjacent = Path(sys.prefix).parent / "external" / "optitrack-sdk-1.10" / "runtime"
+        if adjacent.is_dir() and adjacent not in paths:
+            paths.append(adjacent)
     paths.extend((src_root / "handtrack" / "cameras" / "optitrack" / "Release",
                   src_root / "unity_hand_tracking" / "optitrack_cam_py" / "Release"))
     return paths
