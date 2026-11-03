@@ -199,8 +199,8 @@ class MultiCameraTracker:
             self._clear_calibration()
             self.calibration_error = str(exc)
             print(f"[Calibration] Live preview / 2D only: {exc}")
-            print("[Calibration] Stop preview, run 'mavis-track calibrate --backend optitrack', "
-                  "then start tracking again to enable 3D.")
+            print("[Calibration] Close the tracking GUI, run 'mavis-track calibrate --backend optitrack', "
+                  "then reopen the GUI to enable 3D.")
 
         # --- MediaPipe (one instance per camera for thread safety) ---
         self.hands_detectors = []

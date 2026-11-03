@@ -128,6 +128,9 @@ def test_calibration_keyboard_selects_camera_clamps_and_toggles_power():
 def test_camera_manager_methods_validate_index_and_delegate(monkeypatch):
     from unity_hand_tracking.optitrack_cam_py.multi_mjpeg import CameraManager
     manager=CameraManager.__new__(CameraManager)
+    import threading
+    manager._stop_lock=threading.RLock()
+    manager._shutdown=False
     camera=Camera(11)
     manager.workers=[SimpleNamespace(camera=camera)]
     with pytest.raises(ValueError):manager.get_illumination(-1)

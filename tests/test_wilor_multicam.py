@@ -325,3 +325,117 @@ def test_missing_views_still_validate_clock_and_color(models):
             tracker.process_views([None, None], color="gray")
         assert tracker.process_views([None, None], timestamp=1) == (None, None)
         assert state.batches == []
+
+
+
+def test_mediapipe_wilor_switches_reopen_four_cameras_without_terminal_sdk_shutdown(
+        models, app, monkeypatch, tmp_path):
+    from mavis_track._optitrack_runtime import capture_runtime
+    from unity_hand_tracking.optitrack_cam_py import multi_mjpeg, mocap_tracker
+
+    root, model_state = models
+
+    class Frame:
+        def __init__(self, camera):
+            self.camera = camera
+            self.released = False
+            camera.frames += 1
+        def rasterize(self, width, height):
+            return np.full((height, width, 4), 50 + self.camera.index * 30, np.uint8)
+        def release(self):
+            assert not self.released
+            self.released = True
+            self.camera.frames -= 1
+
+    class Camera:
+        def __init__(self, sdk, index):
+            self.sdk, self.index = sdk, index
+            self.frames = 0
+            self.running = self.released = False
+            self.exposure = 15
+            self.intensity = 15
+        def width(self): return 96
+        def height(self): return 72
+        def set_video_type(self, value): pass
+        def set_exposure(self, value): self.exposure = value
+        def get_exposure(self): return self.exposure
+        def set_aec(self, value): pass
+        def set_agc(self, value): pass
+        def set_text_overlay(self, value): pass
+        def get_intensity(self): return self.intensity
+        def min_intensity(self): return 0
+        def max_intensity(self): return 15
+        def set_intensity(self, value): self.intensity = value; return value
+        def is_high_power_supported(self): return False
+        def is_high_power_available(self): return False
+        def get_high_power(self): return False
+        def set_high_power(self, value): raise ValueError("unsupported")
+        def start(self): self.running = True
+        def stop(self): self.running = False
+        def get_latest_frame(self): return Frame(self) if self.running else None
+        def release(self):
+            assert not self.released and not self.running and self.frames == 0
+            self.released = True
+
+    class TerminalSdk:
+        # Mirrors the existing binding: initialize accesses a singleton;
+        # shutdown is terminal and subsequent initialize cannot revive it.
+        def __init__(self):
+            self.initializations = self.shutdowns = 0
+            self.dead = False
+            self.leases = []
+        def initialize_sdk(self): self.initializations += 1
+        def camera_count(self): return 0 if self.dead else 4
+        def get_camera_by_index(self, index):
+            assert not self.dead
+            camera = Camera(self, index)
+            self.leases.append(camera)
+            return camera
+        def shutdown_sdk(self):
+            assert all(camera.released for camera in self.leases)
+            self.shutdowns += 1
+            self.dead = True
+
+    class Detector:
+        def __init__(self, **kwargs): pass
+        def process(self, image): return None
+        def close(self): pass
+
+    sdk = TerminalSdk()
+    monkeypatch.setattr(multi_mjpeg, "optitrack_cam", sdk)
+    manager = lambda: multi_mjpeg.CameraManager(discovery_wait=0)
+    monkeypatch.setattr(mocap_tracker, "CameraManager", manager)
+    monkeypatch.setattr(sessions, "camera_manager", manager)
+    monkeypatch.setattr(mocap_tracker, "CALIBRATION_FILE", str(tmp_path / "no-calibration.npz"))
+    monkeypatch.setattr(mocap_tracker.MultiCameraTracker, "_load_mediapipe_hands_class",
+                        staticmethod(lambda: Detector))
+    monkeypatch.setattr(gui, "_preload_mediapipe_runtime", lambda: (True, ""))
+    monkeypatch.setattr(gui, "LSLBroadcaster", lambda **kwargs: None)
+    monkeypatch.setattr(gui.StereoHandTrackerGUI, "start_udp_broadcast", lambda self: None)
+    monkeypatch.setattr(gui.StereoHandTrackerGUI, "stop_udp_broadcast", lambda self: None)
+    window = gui.StereoHandTrackerGUI(model="mediapipe", wilor_root=root)
+    window._mediapipe_ready = True
+    try:
+        window.show()
+        for mode in ("mediapipe", "wilor", "mediapipe", "wilor", "wilor"):
+            window.model_combo.setCurrentIndex(window.model_combo.findData(mode))
+            window.start_tracking()
+            if mode == "wilor":
+                wait_until(lambda: window._wilor_session.snapshot()[0] is not None, app)
+            wait_until(lambda: len(window.video_labels) == 4 and
+                       all(label.pixmap() is not None for label in window.video_labels), app)
+            assert window.num_cameras == 4
+            assert sdk.initializations == 1 and sdk.shutdowns == 0
+            window.exposure_spinboxes[0].setValue(20 if mode == "wilor" else 21)
+            window.stop_tracking()
+            wait_until(lambda: window._wilor_session is None, app)
+            assert all(camera.released for camera in sdk.leases)
+            assert sdk.shutdowns == 0
+            assert window.model_combo.isEnabled() and window.start_btn.isEnabled()
+        assert len(sdk.leases) == 20
+        assert model_state.loads == model_state.closes == 3
+    finally:
+        window.close()
+        wait_until(lambda: window._wilor_session is None, app)
+        capture_runtime(sdk).close()
+    assert sdk.shutdowns == 1
