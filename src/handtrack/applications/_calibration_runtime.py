@@ -2,14 +2,23 @@
 
 import importlib
 import itertools
-from datetime import datetime
 import os
+from datetime import datetime
 from pathlib import Path
+
 import numpy as np
 
 from handtrack.processing._calibration_solver import (
-    calibrate_intrinsic_candidates, calibrate_stereo_robust, solve_camera_pose_graph,
-    validate_heldout_board_reconstruction)
+    calibrate_intrinsic_candidates,
+    calibrate_stereo_robust,
+    solve_camera_pose_graph,
+    validate_heldout_board_reconstruction,
+)
+
+# Populated from the explicitly selected backend by _load_backend.
+CALIBRATION_FILE: str | None = None
+CHARUCO_SQUARE_LENGTH: float | None = None
+CHARUCO_MARKER_LENGTH: float | None = None
 
 _CONFIG_NAMES = ("ARUCO_DICT", "CALIBRATION_DIR", "CALIBRATION_FILE",
                  "CHARUCO_MARKER_LENGTH", "CHARUCO_SQUARE_LENGTH",
@@ -25,6 +34,23 @@ _board_validation = None
 MAX_BOARD_SHAPE_RMS_MM = 2.0
 MAX_BOARD_SCALE_ERROR_PERCENT = 2.0
 MAX_BOARD_PLANARITY_RMS_MM = 1.0
+
+
+class CalibrationQualityError(ValueError):
+    """A solved candidate was retained but is unsuitable for publication."""
+
+
+def _heldout_check(errors, label, failures):
+    values = np.asarray(errors, dtype=float)
+    finite = values.size > 0 and np.isfinite(values).all()
+    maximum = float(np.max(values)) if finite else float("inf")
+    rms = float(np.sqrt(np.mean(values ** 2))) if finite else float("inf")
+    passed = finite and maximum <= MAX_HELDOUT_REPROJECTION_ERROR
+    detail = (f"{label}: held-out max {maximum:.3f} px "
+              f"(limit {MAX_HELDOUT_REPROJECTION_ERROR:.3f} px; RMS {rms:.3f} px)")
+    print(f"{'PASS' if passed else 'FAIL'} {detail}")
+    if not passed:
+        failures.append(detail if finite else f"{label}: missing/non-finite held-out errors")
 
 
 def _load_backend(backend):
@@ -75,9 +101,12 @@ def calibrate_stereo_pairs(all_corners, all_ids, board, matrices, dists, img_siz
                 images_b.append(cb[bb].reshape(-1, 1, 2).astype(np.float32))
         if len(objects) < 11:
             continue
-        _stereo_results.append(calibrate_stereo_robust(a, b, objects, images_a, images_b,
-                                                       matrices[a], dists[a], matrices[b], dists[b],
-                                                       img_size, min_inliers=8))
+        result = calibrate_stereo_robust(a, b, objects, images_a, images_b,
+                                         matrices[a], dists[a], matrices[b], dists[b],
+                                         img_size, min_inliers=8)
+        _stereo_results.append(result)
+        print(f"Stereo {a}-{b}: training RMS {result.rms:.3f} px; "
+              f"held-out max {np.max(result.heldout_errors):.3f} px")
     if num_cameras == 1:
         return [np.eye(3)], [np.zeros((3, 1))]
     rotations, translations, _ = solve_camera_pose_graph(num_cameras, _stereo_results)
@@ -89,6 +118,8 @@ def calibrate_stereo_pairs(all_corners, all_ids, board, matrices, dists, img_siz
 
 def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_coeffs_list,
                      R_matrices, T_vectors, *, intrinsic_results=None):
+    if CALIBRATION_FILE is None or CHARUCO_SQUARE_LENGTH is None or CHARUCO_MARKER_LENGTH is None:
+        raise RuntimeError("Select a camera backend before saving calibration")
     results = intrinsic_results if intrinsic_results is not None else _intrinsic_results
     data = {"schema_version": 2, "num_cameras": num_cameras, "img_size": img_size,
             "image_sizes": _image_sizes if _image_sizes is not None else np.tile(img_size, (num_cameras, 1)),
@@ -100,7 +131,10 @@ def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_
         data["camera_uid_high"] = [item["uid"][0] for item in _diagnostics]
         data["camera_uid_low"] = [item["uid"][1] for item in _diagnostics]
         data["camera_serials"] = np.asarray([str(item.get("serial", "")) for item in _diagnostics])
-    quality = bool(results) and len(results) == num_cameras
+    failures = []
+    if not results or len(results) != num_cameras:
+        failures.append(f"Intrinsic results: expected {num_cameras}, got {len(results)}")
+    print("Calibration quality checks (per-camera RMS alone does not validate stereo/3D):")
     for index in range(num_cameras):
         for prefix, values in (("camera_matrix", camera_matrices), ("dist_coeffs", dist_coeffs_list),
                                ("R", R_matrices), ("T", T_vectors)):
@@ -111,8 +145,7 @@ def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_
         if index < len(results):
             result = results[index]
             heldout = np.asarray(result.heldout_errors)
-            quality &= bool(heldout.size and np.isfinite(heldout).all()
-                            and np.max(heldout) <= MAX_HELDOUT_REPROJECTION_ERROR)
+            _heldout_check(heldout, f"Camera {index}", failures)
             data[f"heldout_errors_{index}"] = heldout
             data[f"per_view_errors_{index}"] = result.per_view_errors
             data[f"inlier_indices_{index}"] = result.inlier_indices
@@ -124,41 +157,60 @@ def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_
             data[f"candidate_heldout_rms_{index}"] = result.candidate_heldout_rms
     for pair in _stereo_results:
         heldout = np.asarray(pair.heldout_errors)
-        quality &= bool(heldout.size and np.isfinite(heldout).all()
-                        and np.max(heldout) <= MAX_HELDOUT_REPROJECTION_ERROR)
+        _heldout_check(heldout, f"Stereo {pair.camera_a}-{pair.camera_b}", failures)
         data[f"stereo_heldout_{pair.camera_a}_{pair.camera_b}"] = heldout
     if num_cameras > 1:
         # A connected stereo graph is required before publishing extrinsics.
         if not _stereo_results:
-            quality = False
+            failures.append("No stereo pairs solved; camera graph is disconnected")
         else:
             try:
                 solve_camera_pose_graph(num_cameras, _stereo_results)
-            except ValueError:
-                quality = False
+            except ValueError as exc:
+                failures.append(f"Camera pose graph: {exc}")
     if num_cameras > 1:
         validation = _board_validation
-        quality &= validation is not None
+        if validation is None:
+            failures.append("Held-out 3D board validation is missing")
         if validation is not None:
-            metrics = (validation.shape_rms_mm, abs(validation.scale_error_percent), validation.planarity_rms_mm)
-            quality &= bool(validation.num_views >= 3 and np.isfinite(metrics).all()
-                            and all(value <= limit for value, limit in zip(metrics,
-                                (MAX_BOARD_SHAPE_RMS_MM, MAX_BOARD_SCALE_ERROR_PERCENT, MAX_BOARD_PLANARITY_RMS_MM))))
+            if not validation.num_views >= 3:
+                failures.append(f"Held-out board views: {validation.num_views}; need at least 3")
+            for label, value, limit, units in (
+                ("Board shape RMS", validation.shape_rms_mm, MAX_BOARD_SHAPE_RMS_MM, "mm"),
+                ("Board scale error", abs(validation.scale_error_percent), MAX_BOARD_SCALE_ERROR_PERCENT, "%"),
+                ("Board planarity RMS", validation.planarity_rms_mm, MAX_BOARD_PLANARITY_RMS_MM, "mm"),
+            ):
+                passed = np.isfinite(value) and value <= limit
+                detail = f"{label}: {value:.3f} {units} (limit {limit:.3f} {units})"
+                print(f"{'PASS' if passed else 'FAIL'} {detail}")
+                if not passed:
+                    failures.append(detail)
             data.update(board_shape_rms_mm=validation.shape_rms_mm,
                         board_scale_error_percent=validation.scale_error_percent,
                         board_planarity_rms_mm=validation.planarity_rms_mm,
                         board_validation_views=validation.num_views,
                         board_validation_points=validation.num_points,
                         reserved_view_indices=np.asarray(_reserved_indices, dtype=int))
+    quality = not failures
     data["quality_passed"] = quality
+    data["quality_failure_reasons"] = np.asarray(failures, dtype=str)
+    data["max_heldout_reprojection_error_px"] = MAX_HELDOUT_REPROJECTION_ERROR
+    data["max_board_shape_rms_mm"] = MAX_BOARD_SHAPE_RMS_MM
+    data["max_board_scale_error_percent"] = MAX_BOARD_SCALE_ERROR_PERCENT
+    data["max_board_planarity_rms_mm"] = MAX_BOARD_PLANARITY_RMS_MM
     destination = Path(CALIBRATION_FILE)
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + ".candidate.npz")
     np.savez_compressed(candidate, **data)
     if not quality:
-        raise ValueError(f"Calibration failed held-out quality checks; previous calibration preserved. Candidate: {candidate}")
+        reasons = "\n".join(f"  - {reason}" for reason in failures)
+        raise CalibrationQualityError(
+            f"Calibration quality checks failed:\n{reasons}\n"
+            f"previous calibration preserved. Candidate: {candidate}\n"
+            "Hold the board still for each capture, vary its angle/position between captures, "
+            "and check board dimensions and camera mounting.")
     from mavis_track.calibration import load_camera_calibration
-    load_camera_calibration(candidate, count=num_cameras, image_sizes=data["image_sizes"], camera_ids=data["camera_ids"])
+    load_camera_calibration(candidate, count=num_cameras, image_sizes=data["image_sizes"], camera_ids=data["camera_ids"], diagnostics=_diagnostics)
     backup = destination.parent / ("calib_backup_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".npz")
     if destination.exists():
         backup.write_bytes(destination.read_bytes())
@@ -205,6 +257,9 @@ def main(backend):
     try:
         module._capture_main()
         return 0 if saved else 1
+    except CalibrationQualityError as exc:
+        print(str(exc))
+        return 1
     finally:
         for name, value in previous.items():
             setattr(module, name, value)

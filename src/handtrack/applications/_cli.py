@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 _BACKEND_ENTRYPOINTS = {
     "optitrack": {
@@ -28,7 +28,7 @@ _BACKEND_ENTRYPOINTS = {
 def _optitrack_sdk_available() -> bool:
     try:
         config = importlib.import_module("unity_hand_tracking.optitrack_cam_py.config")
-    except Exception:
+    except Exception:  # noqa: BLE001 - Optional native SDK availability probe.
         return False
 
     return getattr(config, "optitrack_cam", None) is not None
@@ -72,10 +72,12 @@ def _run_doctor(selected_backend: str) -> int:
     return int(doctor_main(argv))
 
 
-def _run_inspect_calibration(selected_backend: str) -> int:
+def _run_inspect_calibration(selected_backend: str, *, candidate=False) -> int:
     from ._inspect_calibration import main as inspect_main
 
     argv = ["--backend", selected_backend]
+    if candidate:
+        argv.append("--candidate")
     return int(inspect_main(argv))
 
 
@@ -252,6 +254,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="summarize the saved calibration file for the selected backend",
     )
     _add_backend_argument(inspect_parser)
+    inspect_parser.add_argument("--candidate", action="store_true",
+                                help="inspect the last rejected calibration candidate")
 
     record_parser = subparsers.add_parser(
         "record",
@@ -431,7 +435,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_doctor(selected_backend)
 
     if args.command == "inspect-calibration":
-        return _run_inspect_calibration(selected_backend)
+        return (_run_inspect_calibration(selected_backend, candidate=True) if args.candidate
+                else _run_inspect_calibration(selected_backend))
 
     if args.command == "benchmark":
         return _run_benchmark(selected_backend, args)
