@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import importlib
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 
@@ -37,6 +37,21 @@ def _print_row(label: str, value: str) -> None:
     print(f"{label:<18} {value}")
 
 
+def _print_quality(data):
+    if "quality_passed" in data:
+        _print_row("quality_passed", _format_scalar(data["quality_passed"]))
+    for reason in np.asarray(data.get("quality_failure_reasons", [])).reshape(-1):
+        _print_row("failed check", str(reason))
+    for key in sorted(data):
+        if key.startswith(("heldout_errors_", "stereo_heldout_")):
+            values = np.asarray(data[key], dtype=float)
+            rms = float(np.sqrt(np.mean(values ** 2))) if values.size else float("nan")
+            maximum = float(np.max(values)) if values.size else float("nan")
+            _print_row(key, f"RMS {rms:.3f} px; max {maximum:.3f} px")
+        elif key.startswith(("board_", "max_board_", "max_heldout_")):
+            _print_row(key, _format_scalar(data[key]))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Inspect the saved calibration file for a HandTrack backend.",
@@ -47,10 +62,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="camera backend whose calibration artifact should be inspected",
     )
+    parser.add_argument("--candidate", action="store_true",
+                        help="inspect the last rejected candidate, without publishing it")
     args = parser.parse_args(argv)
 
     cfg = _load_backend_config(args.backend)
-    calibration_path = Path(cfg.CALIBRATION_FILE)
+    calibration_path = Path(str(cfg.CALIBRATION_FILE) + ".candidate.npz") if args.candidate else Path(cfg.CALIBRATION_FILE)
 
     print(f"[handtracker] Calibration backend: {args.backend}")
     _print_row("file", str(calibration_path))
@@ -66,10 +83,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         from mavis_track._files import load_npz
         data = load_npz(calibration_path)
-    except Exception as exc:
+    except (OSError, ValueError, TypeError, EOFError) as exc:
         _print_row("status", f"unreadable ({exc})")
         return 1
 
+    try:
+        _print_quality(data)
+    except (ValueError, TypeError) as exc:
+        _print_row("quality", f"unreadable ({exc})")
+        return 1
     try:
         from mavis_track.calibration import load_camera_calibration
         load_camera_calibration(calibration_path, count=int(data.get("num_cameras", 0)))

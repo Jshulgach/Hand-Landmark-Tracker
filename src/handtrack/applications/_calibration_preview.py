@@ -10,6 +10,7 @@ class CalibrationControls:
         'Up/Down: exposure   Shift: step 10   0-9: select camera   A: all cameras',
         'I/K: IR intensity   M: max available light   H: high power',
         'Space: pause/resume auto-capture   Q: finish capture   Esc: cancel',
+        'Hold board still for each capture; change angle/position between captures.',
     )
 
     def __init__(self, manager, initial_exposure=10):
@@ -79,7 +80,7 @@ class CalibrationControls:
                 continue
             try:
                 self.manager.set_exposure(index, requested)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - Native camera control boundary.
                 self.last_error = f'Camera {index}: exposure update failed ({exc})'
                 continue
             self.exposures[index] = requested

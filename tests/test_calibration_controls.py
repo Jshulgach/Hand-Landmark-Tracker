@@ -83,13 +83,23 @@ def test_finish_solves_but_cancel_preserves_previous_calibration(monkeypatch,tmp
         calls.append('stereo')
         return [np.eye(3)]*2,[np.zeros(3)]*2
     def save(*args):calls.append('save');published.write_bytes(b'validated replacement')
+    detectors=[]
+    used=set()
+    def build(**kwargs):
+        detector=object()
+        detectors.append(detector)
+        return object(),detector
+    def detect(args):
+        used.add(args[1])
+        return True,(corners,ids)
     module=SimpleNamespace(CameraManager=lambda:manager,CHARUCO_SQUARES_X=7,CHARUCO_SQUARES_Y=5,
         NUM_CALIBRATION_IMAGES=20,auto_detect_dictionary=lambda frame:('DICT_5X5_250',6),
-        build_charuco_detector=lambda **kwargs:(object(),object()),
-        detect_charuco=lambda args:(True,(corners,ids)),annotate_frame=lambda frame,*args:frame,
+        build_charuco_detector=build,
+        detect_charuco=detect,annotate_frame=lambda frame,*args:frame,
         calibrate_intrinsics=intrinsics,calibrate_stereo_pairs=stereo,save_calibration=save)
     capture.run_capture(module)
     assert manager.stopped
+    assert len(detectors)==2 and used==set(detectors)
     assert calls==(['intrinsics','stereo','save'] if should_save else [])
     assert published.read_bytes()==(b'validated replacement' if should_save else b'previous validated result')
 
