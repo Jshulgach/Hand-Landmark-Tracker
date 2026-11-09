@@ -7,8 +7,42 @@ from handtrack.processing._calibration_solver import (
     point_rmse,
     robust_error_threshold,
     solve_camera_pose_graph,
+    stereo_view_error,
     validate_heldout_board_reconstruction,
 )
+
+
+def test_stereo_score_uses_both_views_of_a_small_distant_board():
+    objects=np.zeros((20,3),np.float64)
+    objects[:,:2]=np.mgrid[1:6,1:5].T.reshape(-1,2)*.04
+    matrix=np.array([[1200.,0,640],[0,1200,512],[0,0,1]])
+    distortion=np.zeros(5)
+    rotation=np.eye(3)
+    translation=np.array([[-1.5],[0.],[0.]])
+    rvec=np.array([.03,.02,.01])
+    tvec=np.array([-.1,-.08,3.])
+    image_a,_=cv2.projectPoints(objects,rvec,tvec,matrix,distortion)
+    image_b,_=cv2.projectPoints(objects,rvec,tvec+translation.ravel(),matrix,distortion)
+    rng=np.random.default_rng(10)
+    image_a+=rng.normal(0,.2,image_a.shape)
+    image_b+=rng.normal(0,.2,image_b.shape)
+    # The previous single-camera pose score exceeds the quality limit even
+    # with the correct camera calibration and subpixel corner noise.
+    _,single_rvec,single_tvec=cv2.solvePnP(objects,image_a,matrix,distortion)
+    predicted_a,_=cv2.projectPoints(objects,single_rvec,single_tvec,matrix,distortion)
+    predicted_b,_=cv2.projectPoints(objects,single_rvec,single_tvec+translation,matrix,distortion)
+    old_error=np.sqrt(.5*(point_rmse(image_a,predicted_a)**2+point_rmse(image_b,predicted_b)**2))
+    assert old_error>1.5
+    error=stereo_view_error(objects,image_a,image_b,matrix,distortion,matrix,distortion,
+                            rotation,translation)
+    assert error<.4
+    reverse=stereo_view_error(objects,image_b,image_a,matrix,distortion,matrix,distortion,
+                              rotation,-translation)
+    np.testing.assert_allclose(error,reverse,atol=1e-6)
+    # Jointly fitting the board must not hide an incorrect stereo transform.
+    wrong=stereo_view_error(objects,image_a,image_b,matrix,distortion,matrix,distortion,
+                            rotation,translation+np.array([[0.],[.1],[0.]]))
+    assert wrong>1.5
 
 
 def _synthetic_intrinsic_observations(count=36):

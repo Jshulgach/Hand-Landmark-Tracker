@@ -23,6 +23,7 @@ Usage from another script:
 
 import threading
 import time
+from dataclasses import asdict
 
 from mavis_track._capture import FrameBuffer, snapshots
 from mavis_track._optitrack_runtime import capture_runtime, shutdown_capture_sdks
@@ -59,9 +60,10 @@ class CameraWorker(FrameBuffer, threading.Thread):
     so the most recent frame is always available via get_frame().
     """
 
-    def __init__(self, camera, index, exposure=None, mjpeg_mode=MJPEG_MODE):
+    def __init__(self, camera, index, exposure=None, mjpeg_mode=MJPEG_MODE, manager=None):
         super().__init__(daemon=True)
         self.camera = camera
+        self.manager = manager
         self.index = index
         self.name = f"Camera #{index}"
         self.exposure = exposure  # None = let camera auto-manage
@@ -73,9 +75,11 @@ class CameraWorker(FrameBuffer, threading.Thread):
         self.width = camera.width()
         self.height = camera.height()
         self.frame_timestamp = None
+        self.capture_settings = {"camera_index": index, "width": self.width, "height": self.height}
         self.status = "starting"
         self.error = ""
         self.ready = threading.Event()
+        self.capture_started = threading.Event()
 
     # -- public helpers (safe to call from any thread) ----------------------
 
@@ -113,24 +117,42 @@ class CameraWorker(FrameBuffer, threading.Thread):
         cam.set_exposure(self.exposure)
         cam.set_aec(False)
         cam.set_agc(False)
-        cam.set_text_overlay(True)
+        cam.set_text_overlay(False)
         cam.start()
 
         time.sleep(0.2)  # let settings take effect
 
         actual_exp = cam.get_exposure()
+        self.capture_settings.update(exposure=actual_exp, video_mode=self.mjpeg_mode)
+        if hasattr(cam, "capture_info"):
+            self.capture_settings.update(cam.capture_info())
+        from mavis_track._illumination import read_illumination
+        self.capture_settings['illumination'] = asdict(read_illumination(cam))
+        self.status = "waiting for frames"
+        self.capture_started.set()
         print(
             f"[{self.name}] Exposure={self.exposure}, "
             f"AEC=False, AGC=False | Actual={actual_exp}"
         )
 
         while self.running:
-            frame_obj = cam.get_latest_frame()
+            recorder = self.manager.recorder if self.manager is not None else None
+            # Preserve SDK frames while recording; preview can still replace its slot.
+            frame_obj = cam.get_frame() if recorder is not None else cam.get_latest_frame()
             if frame_obj:
                 try:
+                    received = time.perf_counter()
+                    metadata = {"host_received_monotonic": received,
+                                "sdk_timing_available": hasattr(frame_obj, "timing"),
+                                "exposure_setting": self.exposure,
+                                "inference_enabled": getattr(self.manager, "inference_enabled", True)}
+                    if hasattr(frame_obj, "timing"):
+                        metadata.update(frame_obj.timing())
                     img_rgba = frame_obj.rasterize(self.width, self.height)
                     img_bgr = cv2.cvtColor(img_rgba, cv2.COLOR_RGBA2BGR)
                     self.publish_frame(img_bgr)
+                    if recorder is not None:
+                        recorder.frame(self.index, img_bgr, metadata)
                 finally:
                     frame_obj.release()
             # Always yield CPU — prevents starving other processes.
@@ -161,6 +183,13 @@ class CameraManager:
         self._shutdown = False  # Capture stopped; the process SDK remains alive.
         self._stop_lock = threading.RLock()
         self.num_cameras = 0
+        self.recorder = None
+        self.inference_enabled = True
+        self._sync_stop = threading.Event()
+        self._sync_lock = threading.RLock()
+        self._expected_sync_hz = None
+        self._sync_thread = None
+        self._sync_status = {"available": False, "reason": "Cameras not started"}
         self.camera_indices = []
         self._runtime = capture_runtime(optitrack_cam)
         with self._stop_lock:
@@ -231,6 +260,7 @@ class CameraManager:
                 worker = CameraWorker(
                     handles[index], index, exposure=exposure, mjpeg_mode=mjpeg_mode
                 )
+                worker.manager = self
                 worker.start()
                 self.workers.append(worker)
                 del unstarted[index]
@@ -240,10 +270,117 @@ class CameraManager:
                 camera.release()
             raise
 
+        self._sync_thread = threading.Thread(target=self._monitor_sync, name="OptiHub-status", daemon=True)
+        self._sync_thread.start()
         return self.workers
 
+    def _monitor_sync(self):
+        while not self._sync_stop.is_set():
+            self._sample_sync_status()
+            self._sync_stop.wait(.2)
+
+    def _sample_sync_status(self):
+        with self._sync_lock:
+            status = {"host_sampled_monotonic": time.perf_counter(),
+                      "input_level": None, "input_edges": None,
+                      "input_edge_recording_supported": False,
+                      "configurable": hasattr(optitrack_cam, "configure_sync_preset"),
+                      "exposure_output_configurable": hasattr(optitrack_cam, "configure_exposure_output"),
+                      "expected_frequency_hz": self._expected_sync_hz}
+            try:
+                if hasattr(optitrack_cam, "get_sync_status"):
+                    status.update(optitrack_cam.get_sync_status())
+                else:
+                    status.update(available=False, reason="Rebuild binding for OptiHub sync configuration")
+            except Exception as exc:
+                status.update(available=False, reason=str(exc))
+            status["cameras"] = [dict(camera_index=worker.index,
+                                      status=getattr(worker, "status", "unknown"),
+                                      error=getattr(worker, "error", ""),
+                                      last_frame_host_monotonic=getattr(worker, "frame_timestamp", None))
+                                 for worker in self.workers]
+            self._sync_status = status
+            recorder = self.recorder
+            if recorder is not None:
+                recorder.sync(status)
+            return dict(status)
+
+    def get_sync_status(self):
+        return dict(self._sync_status)
+
+    def configure_sync_preset(self, preset):
+        """Explicit mode change, serialized with SDK reads and session shutdown."""
+        if preset not in ("vicon_external_50hz", "internal_50hz"):
+            raise ValueError("Unknown OptiHub sync preset")
+        with self._stop_lock:
+            if self._shutdown or not self.workers:
+                raise RuntimeError("Start cameras before configuring sync")
+            if self.recorder is not None:
+                raise RuntimeError("Stop recording before changing camera sync")
+            if not hasattr(optitrack_cam, "configure_sync_preset"):
+                raise RuntimeError("Rebuild the native binding to enable OptiHub sync controls")
+            with self._sync_lock:
+                try:
+                    optitrack_cam.configure_sync_preset(preset)
+                except Exception:
+                    self._sample_sync_status()
+                    raise
+                self._expected_sync_hz = 50.
+                return self._sample_sync_status()
+
+    def start_recording(self, directory, *, nominal_fps=100., trial_name="trial", session_metadata=None,
+                        calibration_path=None, codec="MJPG"):
+        from mavis_track._camera_recording import CameraRecording
+        with self._stop_lock:
+            if self._shutdown or not self.workers:
+                raise RuntimeError("Start cameras before recording")
+            if self.recorder is not None:
+                raise RuntimeError("A recording is already active")
+            metadata = dict(session_metadata or {})
+            metadata['binding_capabilities'] = {
+                name: getattr(optitrack_cam, name, None) for name in (
+                    'BINDING_API_VERSION', 'CAMERA_RECORDING_API_VERSION', 'OPTIHUB_SYNC_CONTROL_API_VERSION')}
+            metadata['sync_at_recording_start'] = self.get_sync_status()
+            self.recorder = CameraRecording(directory, nominal_fps=nominal_fps,
+                                            camera_ids=self.camera_indices,
+                                            camera_settings=[dict(worker.capture_settings) for worker in self.workers],
+                                            trial_name=trial_name, session_metadata=metadata,
+                                            calibration_path=calibration_path, codec=codec)
+            self.recorder.sync(self.get_sync_status())
+            return self.recorder
+
+    def configure_exposure_output(self):
+        with self._stop_lock:
+            if self._shutdown or not self.workers:
+                raise RuntimeError("Start cameras before configuring the exposure output")
+            if self.recorder is not None:
+                raise RuntimeError("Stop recording before changing the exposure output")
+            if not hasattr(optitrack_cam, 'configure_exposure_output'):
+                raise RuntimeError("Rebuild the binding to configure exposure output")
+            with self._sync_lock:
+                try:
+                    optitrack_cam.configure_exposure_output()
+                finally:
+                    self._sample_sync_status()
+            return self.get_sync_status()
+
+    def stop_recording(self):
+        with self._stop_lock:
+            recorder = self.recorder
+            if recorder is not None:
+                try:
+                    recorder.close()
+                finally:
+                    if not recorder._thread.is_alive():
+                        self.recorder = None
+
     def wait_ready(self, timeout=3):
+        status = self._sample_sync_status()
+        external = status.get("available") and status.get("input_source") in (2, 3, 4, 5, 6)
         for worker in self.workers:
+            if external and hasattr(worker, "capture_started"):
+                if worker.capture_started.wait(timeout) and worker.is_alive() and not worker.error:
+                    continue  # A missing external pulse train is not a camera startup failure.
             if not worker.ready.wait(timeout) or worker.frame_timestamp is None:
                 raise RuntimeError(f"{worker.name} did not supply a frame: {worker.error}")
 
@@ -252,6 +389,18 @@ class CameraManager:
         with self._stop_lock:
             if self._shutdown:
                 return
+            recording_error = None
+            try:
+                self.stop_recording()
+            except RuntimeError as exc:
+                if self.recorder is not None:
+                    raise  # Writer still owns queued frames; preserve session for retry.
+                recording_error = exc
+            self._sync_stop.set()
+            if self._sync_thread is not None:
+                self._sync_thread.join(timeout=3)
+                if self._sync_thread.is_alive():
+                    raise RuntimeError("Sync status worker did not stop")
             print("Stopping camera workers...")
             for worker in self.workers:
                 worker.stop()
@@ -266,6 +415,8 @@ class CameraManager:
             self.workers.clear()
             self._runtime.release(self)
             print("Camera capture cleanup complete.")
+            if recording_error is not None:
+                raise recording_error
 
     # -- frame access -------------------------------------------------------
 
@@ -274,6 +425,9 @@ class CameraManager:
         with self._stop_lock:
             if not self._shutdown and 0 <= cam_index < len(self.workers):
                 self.workers[cam_index].set_exposure(value)
+                self.workers[cam_index].capture_settings["exposure"] = value
+                if self.recorder is not None:
+                    self.recorder.event('exposure_changed', camera_index=cam_index, requested_value=value)
 
     def _illumination_camera(self, cam_index):
         if self._shutdown:
@@ -290,8 +444,12 @@ class CameraManager:
     def set_illumination(self, cam_index, *, intensity=None, high_power=None, maximize=False):
         from mavis_track._illumination import set_illumination
         with self._stop_lock:
-            return set_illumination(self._illumination_camera(cam_index), intensity=intensity,
-                                    high_power=high_power, maximize=maximize)
+            state = set_illumination(self._illumination_camera(cam_index), intensity=intensity,
+                                     high_power=high_power, maximize=maximize)
+            self.workers[cam_index].capture_settings['illumination'] = asdict(state)
+            if self.recorder is not None:
+                self.recorder.event('illumination_changed', camera_index=cam_index, state=asdict(state))
+            return state
 
     def get_frame(self, cam_index: int):
         """Return the latest BGR frame from a specific camera."""

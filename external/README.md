@@ -143,3 +143,13 @@ license. Vendor DLLs, headers and import libraries are excluded.
 
 The workflow exports a ZIP only when explicitly requested through its manual
 `export_bundle` input; normal compile checks publish no native artifacts.
+
+The current source also builds `CAMERA_RECORDING_API_VERSION = 1`, with frame
+IDs/timestamps, camera identity/settings and OptiHub sync configuration reads.
+`OPTIHUB_SYNC_CONTROL_API_VERSION = 1` adds explicit Vicon external 50 Hz and
+internal 50 Hz presets through `configure_sync_preset()`. Mode changes read back
+SDK settings and attempt restoration on failure; input signal lock is not measured.
+Rebuild with the same helper for these additions; the earlier prebuilt v2 archive
+may only supply illumination controls. Video/host-time recording works with the
+older binding. OptiHub 2 (2011) exposes no documented electrical input edge/level
+stream through this SDK. See [recording and sync](../docs/optitrack-recording.md).

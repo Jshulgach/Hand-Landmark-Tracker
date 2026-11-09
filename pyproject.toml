@@ -39,6 +39,7 @@ stream = ["pylsl>=1.16"]
 applications = ["matplotlib>=3.8", "pyserial>=3.5"]
 ml = ["scikit-learn>=1.4", "torch"]
 optitrack = ["psutil>=5.9"]
+sync = ["ezc3d>=1.5,<2"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5"]
 release = ["build>=1.2", "twine>=5.1"]
@@ -53,6 +54,7 @@ all = [
     "pylsl>=1.16",
     "scikit-learn>=1.4",
     "torch",
+    "ezc3d>=1.5,<2",
 ]
 
 [project.urls]

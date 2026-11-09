@@ -287,35 +287,59 @@ def stereo_view_error(
     rotation_ab: np.ndarray,
     translation_ab: np.ndarray,
 ) -> float:
-    """Score a stereo view by projecting one board pose into both cameras."""
-    success, rvec_a, tvec_a = cv2.solvePnP(
-        object_points,
-        image_points_a,
-        camera_matrix_a,
-        dist_coeffs_a,
-        flags=cv2.SOLVEPNP_ITERATIVE,
-    )
-    if not success:
-        return float("inf")
-    rotation_board_a, _ = cv2.Rodrigues(rvec_a)
-    rotation_board_b = rotation_ab @ rotation_board_a
-    translation_board_b = rotation_ab @ tvec_a + translation_ab
-    rvec_b, _ = cv2.Rodrigues(rotation_board_b)
-    projected_a, _ = cv2.projectPoints(
-        object_points, rvec_a, tvec_a, camera_matrix_a, dist_coeffs_a
-    )
-    projected_b, _ = cv2.projectPoints(
-        object_points, rvec_b, translation_board_b, camera_matrix_b, dist_coeffs_b
-    )
-    return float(
-        np.sqrt(
-            0.5
-            * (
-                point_rmse(image_points_a, projected_a) ** 2
-                + point_rmse(image_points_b, projected_b) ** 2
-            )
-        )
-    )
+    """Score a shared board pose fitted to both views with calibration fixed.
+
+    A pose fitted to only one small planar view can have substantial depth or
+    orientation uncertainty. Propagating that pose to the other camera scores
+    this uncertainty as a stereo calibration error. Fit the six board pose
+    parameters jointly, using the same pointwise pixel RMS as stereoCalibrate.
+    No lens or camera-to-camera parameters are fitted to held-out observations.
+    """
+    # Float64 projections keep finite-difference pose derivatives accurate.
+    objects = np.asarray(object_points, dtype=np.float64).reshape(-1, 3)
+    observed_a = np.asarray(image_points_a, dtype=np.float64).reshape(-1, 2)
+    observed_b = np.asarray(image_points_b, dtype=np.float64).reshape(-1, 2)
+    rotation_ab = np.asarray(rotation_ab, dtype=np.float64).reshape(3, 3)
+    translation_ab = np.asarray(translation_ab, dtype=np.float64).reshape(3, 1)
+
+    def residual(parameters):
+        rotation_a, _ = cv2.Rodrigues(parameters[:3])
+        rvec_b, _ = cv2.Rodrigues(rotation_ab @ rotation_a)
+        projected_a, _ = cv2.projectPoints(
+            objects, parameters[:3], parameters[3:], camera_matrix_a, dist_coeffs_a)
+        projected_b, _ = cv2.projectPoints(
+            objects, rvec_b, rotation_ab @ parameters[3:].reshape(3, 1) + translation_ab,
+            camera_matrix_b, dist_coeffs_b)
+        return np.concatenate(((projected_a.reshape(-1, 2) - observed_a).ravel(),
+                               (projected_b.reshape(-1, 2) - observed_b).ravel()))
+
+    errors = []
+    # Seed from each camera so neither view determines the solution alone.
+    for reverse, matrix, distortion, observed in (
+        (False, camera_matrix_a, dist_coeffs_a, observed_a),
+        (True, camera_matrix_b, dist_coeffs_b, observed_b),
+    ):
+        try:
+            success, rvec, tvec = cv2.solvePnP(objects, observed, matrix, distortion,
+                                              flags=cv2.SOLVEPNP_ITERATIVE)
+            if not success:
+                continue
+            if reverse:
+                rotation, _ = cv2.Rodrigues(rvec)
+                rvec, _ = cv2.Rodrigues(rotation_ab.T @ rotation)
+                tvec = rotation_ab.T @ (tvec - translation_ab)
+            fit = least_squares(residual, np.r_[rvec.ravel(), tvec.ravel()], max_nfev=100)
+            if not fit.success or not np.isfinite(fit.fun).all():
+                continue
+            rotation, _ = cv2.Rodrigues(fit.x[:3])
+            points_a = rotation @ objects.T + fit.x[3:].reshape(3, 1)
+            points_b = rotation_ab @ points_a + translation_ab
+            if np.any(points_a[2] <= 0) or np.any(points_b[2] <= 0):
+                continue
+            errors.append(float(np.sqrt(np.mean(np.sum(fit.fun.reshape(-1, 2) ** 2, axis=1)))))
+        except (cv2.error, ValueError, FloatingPointError):
+            continue
+    return min(errors, default=float("inf"))
 
 
 def calibrate_stereo_robust(
@@ -588,6 +612,8 @@ def validate_heldout_board_reconstruction(
         observations: dict[int, list[tuple[int, np.ndarray]]] = {}
         for camera in range(len(camera_matrices)):
             if view >= len(all_corners[camera]):
+                continue
+            if all_corners[camera][view] is None or all_ids[camera][view] is None:
                 continue
             ids = all_ids[camera][view].reshape(-1)
             corners = all_corners[camera][view].reshape(-1, 1, 2)

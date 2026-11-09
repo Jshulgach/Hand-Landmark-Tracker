@@ -199,6 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_backend_argument(calibrate_parser)
 
+    validation_parser = subparsers.add_parser(
+        'validate-calibration', help='measure distance error, jitter and repeatability at workspace locations')
+    _add_backend_argument(validation_parser)
+    from ._validate_calibration import add_validation_arguments
+    add_validation_arguments(validation_parser)
+
     cameras_parser = subparsers.add_parser(
         "cameras",
         help="preview live feeds from the selected camera backend",
@@ -386,12 +392,17 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--model", choices=("mediapipe", "wilor"), default="mediapipe")
     doctor_parser.add_argument("--wilor-root", help="official WiLoR source and asset directory")
 
+    from ._sync_tools import add_parsers
+    add_parsers(subparsers)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command in ('sync-report', 'sync-replay'):
+        from ._sync_tools import run
+        return run(args)
 
     if args.command == "doctor" and args.model == "wilor":
         from ._wilor_doctor import run
@@ -432,6 +443,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "inspect-calibration":
         return _run_inspect_calibration(selected_backend)
+
+    if args.command == 'validate-calibration':
+        from ._validate_calibration import run_validation, validate_arguments
+        try:
+            validate_arguments(args)
+        except ValueError as error:
+            parser.error(str(error))
+        return run_validation(args, selected_backend)
 
     if args.command == "benchmark":
         return _run_benchmark(selected_backend, args)

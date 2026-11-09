@@ -217,3 +217,22 @@ def test_preview_startup_log_supports_windows_legacy_console_encoding(rig):
         assert tracker.process_frame()[1]==[]
     finally:
         tracker.cleanup()
+
+
+def test_camera_only_start_does_not_load_mediapipe_and_can_enable_later(monkeypatch, rig):
+    _, state = rig
+    original = backend.MultiCameraTracker._load_mediapipe_hands_class
+    def unavailable():
+        raise AssertionError('Camera-only startup loaded inference')
+    monkeypatch.setattr(backend.MultiCameraTracker, '_load_mediapipe_hands_class', staticmethod(unavailable))
+    tracker = backend.MultiCameraTracker()
+    try:
+        assert tracker.initialize_cameras(inference_enabled=False)
+        assert state.managers[-1].started and not state.detectors
+        assert all(frame is not None for frame in tracker.capture_frames())
+        monkeypatch.setattr(backend.MultiCameraTracker, '_load_mediapipe_hands_class', staticmethod(original))
+        tracker.initialize_inference()
+        assert len(state.detectors) == 2
+        assert all(result is not None for result in tracker.process_frame()[2])
+    finally:
+        tracker.cleanup()

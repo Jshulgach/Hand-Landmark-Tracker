@@ -13,6 +13,8 @@ for compatibility. Use `mavis-track COMMAND --help` for all options.
 | `cameras --backend webcam` | Preview capture devices |
 | `record` | Record hands, or synchronized hands/body with `--mode hand-body` |
 | `replay` | Draw recorded hands/body using saved timestamps |
+| `sync-report SESSION` | Audit raw camera videos and align them to a Vicon C3D using explicit anchors |
+| `sync-replay SESSION --vicon TRIAL.c3d` | Separate synchronized video/Vicon review window |
 | `export` | Hand/body CSV landmarks, angles, presence and quality metadata |
 | `doctor --backend webcam` | Required and optional runtime dependency checks |
 | `inspect-calibration --backend webcam` | Inspect saved calibration |
@@ -64,6 +66,11 @@ mode switching in a worker. The preview always uses the newest available frame.
 Stop and close remain responsive while native operations finish; the camera is
 released by its owning worker before another capture is started.
 
+Raw OptiHub video sessions use different files from numeric landmark sessions.
+Use `sync-report` and `sync-replay` for their gap diagnostics, C3D alignment,
+sampled exposure-signal analysis and optional calibrated marker overlays. See
+[Vicon trial workflow](vicon-sync.md) for commands, anchors and confidence limits.
+
 ## Optional WiLoR model
 
 After the [isolated WiLoR setup](wilor.md), source checkouts support:
@@ -81,6 +88,6 @@ WiLoR supports single-source and OptiTrack multi-camera hand preview:
 ./.venv-wilor/Scripts/python.exe -m mavis_track gui --backend optitrack --model wilor --wilor-device cuda --wilor-fast --wilor-batch-size 2
 ```
 
-The grid opens every connected OptiTrack camera. Click Start Tracking and choose
+The grid opens every connected OptiTrack camera. Click Start Cameras and choose
 matched mesh overlays or independent live camera feeds. WiLoR calibrated
 triangulation, recording and streaming are not enabled.

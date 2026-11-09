@@ -4,6 +4,31 @@ import time
 from ._illumination_controls import IlluminationControls
 
 
+class CaptureCountdown:
+    """Require a full visible countdown before accepting a new frame batch."""
+    def __init__(self, seconds=3.0):
+        self.seconds = seconds
+        self.deadline = None
+        self.waiting_message = 'Waiting for all cameras — countdown resets when paused or board visibility is lost'
+
+    def reset(self):
+        self.deadline = None
+
+    def update(self, now, ready):
+        if not ready:
+            self.reset()
+        elif self.deadline is None:
+            self.deadline = now + self.seconds
+
+    def due(self, batch_started):
+        return self.deadline is not None and batch_started >= self.deadline
+
+    def text(self, now):
+        if self.deadline is None:
+            return self.waiting_message
+        return f'Next capture in {max(0., self.deadline-now):.1f} s — hold board still'
+
+
 class CalibrationControls:
     """SDK exposure values use the same 1..480 range as the OptiTrack GUI."""
     instructions = (
@@ -21,6 +46,8 @@ class CalibrationControls:
         self.cancelled = False
         self.last_change = float('-inf')
         self.last_error = ''
+        self.countdown = CaptureCountdown()
+        self.capture_message = ''
         self.lighting = IlluminationControls(manager, self._lighting_changed)
 
     @property
@@ -46,6 +73,7 @@ class CalibrationControls:
             self.selected = index
         elif key == 'space':
             self.paused = not self.paused
+            self.countdown.reset()
         elif key == 'q':
             self.finished = True
         elif key == 'escape':
@@ -56,6 +84,7 @@ class CalibrationControls:
 
     def _lighting_changed(self):
         self.last_change = time.monotonic()
+        self.countdown.reset()
 
     def adjust_lighting(self, key):
         targets = list(range(len(self.exposures))) if self.selected is None else [self.selected]
@@ -84,6 +113,14 @@ class CalibrationControls:
                 continue
             self.exposures[index] = requested
             self.last_change = time.monotonic()
+            self.countdown.reset()
+
+    def countdown_text(self):
+        if self.paused:
+            return 'PAUSED — Space to start a new countdown'
+        if self.capture_message:
+            return self.capture_message
+        return self.countdown.text(time.monotonic())
 
     def description(self):
         target = 'all cameras' if self.selected is None else f'camera {self.selected}'
@@ -119,6 +156,7 @@ class _OpenCVPreview:
     def show_frames(self, frames, status):
         import cv2
         import numpy as np
+        self.instructions = (self.instructions[0], *self.controls.instructions[1:])
         count = len(frames)
         cols = min(2 if count <= 4 else 3, count)
         tile_width = 640
@@ -128,8 +166,9 @@ class _OpenCVPreview:
             tiles.append(np.zeros_like(tiles[0]))
         grid = np.vstack([np.hstack(tiles[i:i+cols]) for i in range(0,len(tiles),cols)])
         footer = len(self.instructions)*36+15
-        grid = cv2.copyMakeBorder(grid, 100, footer, 0, 0, cv2.BORDER_CONSTANT)
+        grid = cv2.copyMakeBorder(grid, 140, footer, 0, 0, cv2.BORDER_CONSTANT)
         lines = [(status,35), (self.controls.last_error or self.controls.description(),75)]
+        lines.append((self.controls.countdown_text(),115))
         lines.extend((text,grid.shape[0]-footer+30+index*36)
                      for index,text in enumerate(self.instructions))
         for text, y in lines:

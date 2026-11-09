@@ -54,12 +54,23 @@ To enable 3D, close the tracking GUI, run
 validates the saved calibration against the connected camera count, identities
 when available, and image sizes before enabling reconstruction.
 
-Within the GUI, **Stop Tracking → select model → Start Tracking** is supported.
+Within the GUI, **Stop Cameras → select model → Start Cameras** is supported.
 Stopping joins the capture workers and releases camera handles. The shared
 OptiTrack SDK stays initialized until the application exits, so MediaPipe and
 WiLoR can reopen the cameras without attempting to restart a shut-down native
 singleton. Start/model selection remains blocked while WiLoR finishes stopping.
 Only one capture session can own the cameras at a time.
+
+**Enable Inference** can be switched independently while cameras keep streaming.
+**Start Recording** saves per-camera videos, frame timing sidecars and sampled
+OptiHub configuration with inference on or off. OptiHub 2 (2011) input levels and
+individual electrical edges are unavailable through the legacy SDK; configuration
+samples are not pulse recordings. See [recording and sync](optitrack-recording.md)
+for session formats, timing limits and the native binding upgrade.
+With the sync-control binding extension, **Apply Sync Mode** selects Vicon Nexus
+external timing (expected 50 Hz, rising edge, divider 1) or an internal 50 Hz
+generator. Applying a mode is explicit and blocked during recording; camera
+startup can wait for external pulses without closing the capture session.
 
 Close MAVIS completely before using a separate calibration or vendor camera
 application. After updating an older GUI that already reported zero cameras on

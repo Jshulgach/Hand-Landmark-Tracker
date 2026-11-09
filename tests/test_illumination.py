@@ -132,7 +132,8 @@ def test_camera_manager_methods_validate_index_and_delegate(monkeypatch):
     manager._stop_lock=threading.RLock()
     manager._shutdown=False
     camera=Camera(11)
-    manager.workers=[SimpleNamespace(camera=camera)]
+    manager.workers=[SimpleNamespace(camera=camera, capture_settings={})]
+    manager.recorder=None
     with pytest.raises(ValueError):manager.get_illumination(-1)
     with pytest.raises(ValueError):manager.set_illumination(2,maximize=True)
     assert manager.set_illumination(0,maximize=True).intensity==11

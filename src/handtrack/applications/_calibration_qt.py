@@ -43,6 +43,10 @@ class CalibrationPreview(QMainWindow):
         self.text_size.valueChanged.connect(self._change_text_size)
         header.addWidget(self.text_size)
         layout.addLayout(header)
+        self.countdown = QLabel(controls.countdown_text())
+        self.countdown.setWordWrap(True)
+        self.countdown.setStyleSheet('color: #ffcc66; padding: 8px; background: #292929;')
+        layout.addWidget(self.countdown)
         self.exposure_status = QLabel()
         self.exposure_status.setWordWrap(True)
         layout.addWidget(self.exposure_status)
@@ -110,6 +114,8 @@ class CalibrationPreview(QMainWindow):
 
     def show_frames(self,frames,status):
         self.status.setText(status)
+        self.countdown.setText(self.controls.countdown_text())
+        self.help.setText('\n'.join(self.controls.instructions))
         self._update_exposure_text()
         for index,(frame,label) in enumerate(zip(frames,self.labels)):
             rgb = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)

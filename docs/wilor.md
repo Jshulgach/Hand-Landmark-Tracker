@@ -41,7 +41,10 @@ This first adapter supports **hands only**, with up to two detected hands.
 Face/body/holistic modes remain MediaPipe. WiLoR also supports OptiTrack
 multi-camera viewing with per-camera meshes and joints. This preview uses one
 shared model, independent per-view tracking and bounded crop batches.
-Calibrated triangulation, recording, UDP and LSL are not enabled for WiLoR.
+The OptiTrack GUI also supports experimental calibrated joint triangulation
+and placement of a WiLoR mesh and skeleton in the shared 3D view. Recording,
+UDP and LSL remain disabled for WiLoR. The standalone frame API still returns
+independent per-view model estimates.
 A Python caller can supply any image sources through the multi-view API; camera
 capture and hardware synchronization remain the caller's responsibility.
 
@@ -258,8 +261,10 @@ After the isolated environment and the existing OptiTrack SDK/USB driver setup:
 Click **Start Tracking**. The grid discovers and displays all connected cameras.
 The **MediaPipe / WiLoR** selector can change estimators while tracking is stopped.
 Existing exposure, IR illumination, text zoom, fit/fill and scrolling controls
-are reused. The WiLoR box-score threshold is adjustable; MediaPipe's tracking
-threshold and calibration-dependent controls are disabled for this mode.
+are reused. The WiLoR box-score threshold is adjustable. MediaPipe's tracking
+threshold, skeleton smoothing and splay calibration controls remain disabled
+for WiLoR; the camera inclusion and reprojection threshold controls apply to
+calibrated WiLoR geometry.
 
 One WiLoR network and detector are shared across the feeds. Hand crops from all
 views are combined into bounded inference batches, rather than loading one large
@@ -302,10 +307,39 @@ avoids shutting down its global singleton on each model switch. Close/relaunch
 an already running GUI after pulling this fix. Close the GUI before opening a
 separate calibration or vendor camera application.
 
-Each view's 3D is a separate monocular model estimate. This mode does not create
-a global reconstructed skeleton, use the saved calibration, or publish fabricated
-3D streams. Saved calibration files are preserved; the MediaPipe path retains
-its existing calibrated reconstruction.
+When cameras start, the GUI checks the same saved calibration, camera IDs and
+resolutions as MediaPipe. A usable calibration enables **Show 3D View** and its
+top, front, side, isometric and palm-plane projections. Enable that checkbox
+after **Start Tracking** to see the WiLoR wireframe mesh and its own 21-joint
+skeleton together. These views are centered/zoomed around the hands rather than
+a floor-aligned capture-volume display. Missing/rejected calibration leaves the
+per-camera overlays available and disables the shared 3D view.
+
+WiLoR's full-image joint projections are undistorted and triangulated from
+two or more enabled cameras. Association supports one hand per handedness;
+multiple same-handed detections suppress that handedness rather than guessing
+which people match. Cross-view track IDs are not treated as shared identities.
+Joint consensus checks pixel reprojection, positive depth and at least a
+two-degree ray angle. Views more than 50 ms behind the latest host receipt
+timestamp are excluded; this is not hardware exposure synchronization.
+
+A similarity transform fits a selected view's MANO skeleton to at least 12
+accepted triangulated joints, including the wrist and palm bases. The same
+rotation, scale and wrist translation place all 778 mesh vertices and all 21
+model joints in the calibration's camera-0 frame. Thus mesh topology and the
+WiLoR skeletal frame stay together. The selection favors the smallest joint
+fit residual, with a 30 mm RMS fit gate and scale bounds of 0.25–4; these are
+project sanity checks, not mocap accuracy specifications. The 3D label's tooltip
+reports contributing cameras, joint reprojection error and mesh fit residual.
+
+**The displayed mesh and skeleton remain fitted model estimates.** They are
+distinct from the independently triangulated joints, retained separately in
+the session packet. No monocular `wrist_camera_translation` is used to place
+the shared mesh. Geometry clears when reconstruction is unavailable, ambiguous
+or stale; frame age is shown explicitly. No WiLoR network stream is published.
+Physical rig accuracy, difficult hand association and moving-hand synchronization
+still require validation; the added tests use synthetic geometry and simulated
+cameras.
 
 Validation used **four simulated camera feeds with real WiLoR checkpoints** on
 the Intel CPU host: all four views produced a hand mesh, only one runtime loaded,
@@ -376,9 +410,9 @@ They do not identify people. Angles remain model-derived geometric estimates.
    left/right swaps, temporal jitter and failure recovery separately.
 4. Measure startup, steady-state latency p50/p95, frame age, throughput and peak
    GPU memory, separately for standard and fast mode.
-5. Only then connect WiLoR's 2D projections to calibrated multi-camera
-   reconstruction. Keep monocular estimates distinct from triangulated data;
-   assess camera distortion and cross-view hand association explicitly.
+5. Evaluate the experimental calibrated mesh path against measured reference
+   data. Keep fitted meshes distinct from triangulated joints; assess camera
+   distortion, source-frame age and cross-view hand association explicitly.
 
 WiLoR improves hand inference capabilities; it does not replace the equal-priority
 whole-body evaluation described in the [model roadmap](mmpose-comparison.md).

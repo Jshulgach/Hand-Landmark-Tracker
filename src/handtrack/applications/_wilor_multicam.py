@@ -15,6 +15,11 @@ def camera_manager():
     return CameraManager()
 
 
+def calibration_file():
+    from unity_hand_tracking.optitrack_cam_py.config import CALIBRATION_FILE
+    return CALIBRATION_FILE
+
+
 @dataclass(frozen=True)
 class ViewPacket:
     frames: tuple
@@ -22,6 +27,7 @@ class ViewPacket:
     received_at: tuple
     finished_at: float
     inference_seconds: float
+    calibrated_hands: tuple = ()
 
 
 class WiLoRCameraSession(threading.Thread):
@@ -29,20 +35,26 @@ class WiLoRCameraSession(threading.Thread):
 
     The GUI reads fresh camera snapshots independently while one shared WiLoR
     model loads/processes. Inference frames always stay paired with their output.
-    No triangulation, recording or network streaming runs in this session.
+    Calibrated geometry is computed from matched inference frames. Mesh shape
+    remains model-derived; recording and network streaming remain disabled.
     """
 
-    calibration_available = False
-    calibration_error = "WiLoR per-camera preview; calibrated reconstruction is not enabled."
-
     def __init__(self, *, root=None, device="auto", fast=False, batch_size=2,
-                 confidence=.3, exposure=10):
+                 confidence=.3, exposure=10, calibration_path=None, max_reprojection_error=8.):
         super().__init__(daemon=True, name="WiLoR-multicam")
         self.options = {"root": root, "device": device, "fast": fast,
                         "batch_size": batch_size, "confidence": confidence,
                         "source_id": "optitrack"}
         self.confidence = confidence
         self.exposure = exposure
+        self.calibration_available = False
+        self.calibration_error = None
+        self.calibration_identity_verified = False
+        self.calibration_path = calibration_path
+        self._calibration = None
+        self._enabled_cameras = None
+        self._geometry_version = 0
+        self.max_reprojection_error = max_reprojection_error
         self._stop_requested = threading.Event()
         self.ready = threading.Event()
         self._lock = threading.RLock()
@@ -56,6 +68,8 @@ class WiLoRCameraSession(threading.Thread):
         self.error = None
         self.device = None
         self.completed_batches = 0
+        self._inference_enabled = True
+        self._inference_revision = 0
         self._stage_started = time.perf_counter()
 
     @property
@@ -100,6 +114,18 @@ class WiLoRCameraSession(threading.Thread):
             # imply synchronized exposure or require cross-view receipt skew.
             return tuple(worker.get_snapshot() for worker in list(self._manager.workers))
 
+    def set_inference_enabled(self, enabled):
+        with self._lock:
+            self._inference_enabled = bool(enabled)
+            self._inference_revision += 1
+            self._packet = None
+            if self._manager is not None:
+                self._manager.inference_enabled = bool(enabled)
+
+    def capture_manager(self):
+        with self._lock:
+            return self._manager
+
     def _control_manager(self):
         if self._manager is None or self._stop_requested.is_set():
             raise RuntimeError("Camera session is stopping or unavailable")
@@ -120,8 +146,16 @@ class WiLoRCameraSession(threading.Thread):
         with self._lock:
             return self._control_manager().set_illumination(index, **kwargs)
 
-    def set_enabled_cameras(self, *_):
-        pass  # Legacy reconstruction controls are disabled for per-camera preview.
+    def set_enabled_cameras(self, cameras):
+        with self._lock:
+            selected = None if cameras is None else frozenset(cameras)
+            if selected == frozenset(range(self.num_cameras)):
+                selected = None
+            if selected == self._enabled_cameras:
+                return
+            self._enabled_cameras = selected
+            self._geometry_version += 1
+            self._packet = None
 
     def update_mp_params(self, confidence, _tracking_confidence):
         with self._lock:
@@ -143,13 +177,32 @@ class WiLoRCameraSession(threading.Thread):
                 raise RuntimeError("No OptiTrack cameras detected")
             manager.start_all(exposure=self.exposure)
             manager.wait_ready()
+            try:
+                from mavis_track.calibration import load_camera_calibration
+                self.calibration_path = self.calibration_path or calibration_file()
+                self._calibration = load_camera_calibration(
+                    self.calibration_path, count=manager.num_cameras,
+                    image_sizes=[manager.get_resolution(i) for i in range(manager.num_cameras)],
+                    camera_ids=getattr(manager, 'camera_indices', list(range(manager.num_cameras))),
+                    diagnostics=manager.get_camera_diagnostics() if hasattr(manager, 'get_camera_diagnostics') else None)
+                self.calibration_identity_verified = self._calibration[4]
+                self.calibration_available = True
+            except (OSError, ValueError) as exc:
+                self.calibration_error = str(exc)
+                print(f'[WiLoR] Per-camera preview only; calibration unavailable: {exc}', flush=True)
             with self._lock:
                 self.num_cameras = manager.num_cameras
                 self.camera_indices = tuple(getattr(manager, "camera_indices", range(self.num_cameras)))
                 self.image_sizes = tuple(manager.get_resolution(i) for i in range(self.num_cameras))
                 self._manager = manager
+                manager.inference_enabled = self._inference_enabled
                 self._set_state("Loading WiLoR", announce=True)
                 self.ready.set()
+            if self._stop_requested.is_set():
+                return
+            while not self._inference_enabled and not self._stop_requested.is_set():
+                self._set_state("Live cameras; inference off")
+                self._stop_requested.wait(.05)
             if self._stop_requested.is_set():
                 return
             try:
@@ -164,7 +217,19 @@ class WiLoRCameraSession(threading.Thread):
                 self._stop_requested.wait()
                 return
             last_received = None
+            last_revision = None
             while not self._stop_requested.is_set():
+                with self._lock:
+                    enabled, revision = self._inference_enabled, self._inference_revision
+                if not enabled:
+                    self._set_state("Live cameras; inference off")
+                    self._stop_requested.wait(.05)
+                    continue
+                if revision != last_revision:
+                    if hasattr(model, "reset_tracking"):
+                        model.reset_tracking()
+                    last_revision = revision
+                    last_received = None
                 snapshots = self.raw_snapshots()
                 frames = tuple(frame for frame, _ in snapshots)
                 if not any(frame is not None for frame in frames):
@@ -193,11 +258,22 @@ class WiLoRCameraSession(threading.Thread):
                     self._stop_requested.wait()
                     break
                 finished = time.perf_counter()
+                calibrated = ()
+                with self._lock:
+                    enabled = self._enabled_cameras
+                    version = self._geometry_version
+                    threshold = self.max_reprojection_error
+                if self.calibration_available:
+                    from handtrack.processing._wilor_geometry import reconstruct_wilor
+                    calibrated = reconstruct_wilor(
+                        results, received, self._calibration, enabled=enabled,
+                        max_reprojection_px=threshold)
                 packet = ViewPacket(
                     frames, results, tuple(stamp for _, stamp in snapshots), finished,
-                    finished - started)
+                    finished - started, calibrated)
                 with self._lock:
-                    if not self._stop_requested.is_set():
+                    if (not self._stop_requested.is_set() and version == self._geometry_version
+                            and revision == self._inference_revision):
                         self._packet = packet
                         self.completed_batches += 1
                         self._set_state("Running WiLoR")

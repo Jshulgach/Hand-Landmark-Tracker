@@ -447,6 +447,10 @@ class WiLoRMultiViewTracker:
                 view._tracks.clear()
         return tuple(results)
 
+    def reset_tracking(self):
+        """Discard temporal associations after inference has been suspended."""
+        self._views.clear()
+
     def close(self):
         self._views.clear()
         self._owner.close()

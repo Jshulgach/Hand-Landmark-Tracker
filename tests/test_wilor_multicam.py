@@ -12,10 +12,86 @@ from PyQt5.QtWidgets import QApplication
 
 from mavis_track import WiLoRMultiViewTracker
 from mavis_track import wilor
+from mavis_track.wilor import WiLoRHandResult, WiLoRFrameResult
 from mavis_track._capture import FrameBuffer
 from mavis_track._illumination import IlluminationState
 from handtrack.applications import _wilor_multicam as sessions
 from unity_hand_tracking.optitrack_cam_py import mocap_handtrack_gui as gui
+
+
+def test_calibrated_wilor_gui_renders_mesh_and_skeleton(cameras, app, monkeypatch, tmp_path):
+    import cv2
+    rng=np.random.default_rng(641)
+    joints=rng.normal(0,.03,(21,3));joints[0]=0
+    joints+=np.array([0.,0.,1.2])
+    vertices=rng.normal(0,.03,(778,3))+joints[0]
+    matrix=np.array([[100.,0,48],[0,100.,36],[0,0,1]])
+    saved=dict(schema_version=2,num_cameras=4,image_sizes=np.array([[96,72]]*4),
+               camera_ids=np.arange(4),quality_passed=True,coordinate_units='meters')
+    predictions=[]
+    for c in range(4):
+        translation=np.array([[-.15*c],[0.],[0.]])
+        for prefix,value in [('camera_matrix',matrix),('dist_coeffs',np.zeros(5)),
+                             ('R',np.eye(3)),('T',translation)]:
+            saved[f'{prefix}_{c}']=value
+        pixels,_=cv2.projectPoints(joints,np.zeros(3),translation,matrix,np.zeros(5))
+        mesh_pixels,_=cv2.projectPoints(vertices,np.zeros(3),translation,matrix,np.zeros(5))
+        hand=WiLoRHandResult(c,'Right',.9,pixels.reshape(21,2),mesh_pixels.reshape(778,2),
+            joints-joints[0],vertices-joints[0],np.array([999.,999.,999.]),np.array([0.,0.,96.,72.]),{})
+        predictions.append(WiLoRFrameResult(0,1.,str(c),(96,72),(hand,),5000.,'caller'))
+    path=tmp_path/'calibration.npz'
+    np.savez(path,**saved)
+    monkeypatch.setattr(sessions,'calibration_file',lambda:path)
+    class Model:
+        faces=np.array([[0,1,2],[3,4,5]],np.int32)
+        device='cpu'
+        def __init__(self,**kwargs):pass
+        def process_views(self,frames,**kwargs):
+            return tuple(predictions[c] if frame is not None else None for c,frame in enumerate(frames))
+        def close(self):pass
+    monkeypatch.setattr(sessions,'WiLoRMultiViewTracker',Model)
+    window=gui.StereoHandTrackerGUI(model='wilor')
+    rendered=[]
+    original_render=window.update_3d_view
+    def render(raw,filtered,meshes=None,faces=None):
+        rendered.append((filtered,meshes,faces))
+        return original_render(raw,filtered,meshes=meshes,faces=faces)
+    window.update_3d_view=render
+    try:
+        window.show()
+        window.start_tracking()
+        wait_until(lambda: window._wilor_session.snapshot()[0] is not None and
+                   bool(window._wilor_session.snapshot()[0].calibrated_hands),app)
+        wait_until(window.show_3d_checkbox.isEnabled,app)
+        assert 'Calibration ready' in window.calibration_label.text()
+        assert window._wilor_session.calibration_identity_verified
+        # Exercise every projection, including the fifth palm-plane view.
+        window.show_3d_top=window.show_3d_front=window.show_3d_side=True
+        window.show_3d_iso=window.show_3d_palm=True
+        window.show_3d_checkbox.setChecked(True)
+        wait_until(lambda: bool(rendered),app)
+        assert window.vis_3d_label.pixmap() is not None
+        assert 'calibrated WiLoR' in window.tracked_hand_label.text()
+        np.testing.assert_allclose(rendered[-1][0][0],joints,atol=1e-8)
+        np.testing.assert_allclose(rendered[-1][1][0],vertices,atol=1e-8)
+        np.testing.assert_array_equal(rendered[-1][2],Model.faces)
+        for worker in cameras.managers[0].workers[1:]:
+            worker.connected=False
+        wait_until(lambda: 'waiting for consistent' in window.tracked_hand_label.text(),app)
+        pixmap=window.vis_3d_label.pixmap()
+        assert pixmap is None or pixmap.isNull()
+        for worker in cameras.managers[0].workers:
+            worker.connected=True
+        wait_until(lambda: 'calibrated WiLoR' in window.tracked_hand_label.text(),app)
+        # Removing the second viewpoint must clear the old mesh, not replace
+        # it with the model's arbitrary monocular camera translation.
+        window._wilor_session.set_enabled_cameras({0})
+        wait_until(lambda: 'waiting for consistent' in window.tracked_hand_label.text(),app)
+        pixmap=window.vis_3d_label.pixmap()
+        assert pixmap is None or pixmap.isNull()
+    finally:
+        window.close()
+        wait_until(lambda: window._wilor_session is None,app)
 
 
 def wait_until(predicate, app=None, timeout=5):
@@ -202,6 +278,112 @@ def test_four_live_tiles_and_controls_work_during_blocked_model_load(models, cam
     finally:
         gate.set()
         timer.stop()
+        window.close()
+        wait_until(lambda: window._wilor_session is None, app)
+
+
+def test_inference_toggle_keeps_cameras_live_and_defers_model_load(models, cameras, app):
+    root, state = models
+    window = gui.StereoHandTrackerGUI(model="wilor", wilor_root=root)
+    try:
+        window.inference_checkbox.setChecked(False)
+        window.start_tracking()
+        wait_until(lambda: window._wilor_session.ready.is_set(), app)
+        wait_until(lambda: len(window.video_labels) == 4 and
+                   all(label.pixmap() is not None for label in window.video_labels), app)
+        manager = cameras.managers[0]
+        assert state.loads == 0
+        count = manager.counter
+        wait_until(lambda: manager.counter > count + 3, app)
+        assert state.loads == 0 and not manager.stopped
+        window.inference_checkbox.setChecked(True)
+        wait_until(lambda: window._wilor_session.snapshot()[0] is not None, app)
+        window.inference_checkbox.setChecked(False)
+        assert window._wilor_session.snapshot()[0] is None
+        batches = window._wilor_session.completed_batches
+        count = manager.counter
+        wait_until(lambda: manager.counter > count + 4, app)
+        assert window._wilor_session.completed_batches == batches
+        assert not manager.stopped and not manager.inference_enabled
+        window.inference_checkbox.setChecked(True)
+        wait_until(lambda: window._wilor_session.completed_batches > batches, app)
+        assert state.loads == 1
+    finally:
+        window.close()
+        wait_until(lambda: window._wilor_session is None, app)
+
+
+@pytest.mark.parametrize('network', [False, True])
+def test_recording_without_inference_flushes_before_gui_closes(models, cameras, app, monkeypatch, tmp_path, network):
+    from types import MethodType
+    from mavis_track import _camera_recording
+    from unity_hand_tracking.optitrack_cam_py.multi_mjpeg import CameraManager
+    gate, entered = threading.Event(), threading.Event()
+    class Writer:
+        def __init__(self, *args): pass
+        def isOpened(self): return True
+        def write(self, image):
+            entered.set()
+            assert gate.wait(3)
+        def release(self): pass
+    monkeypatch.setattr(_camera_recording.cv2, 'VideoWriter', Writer)
+    monkeypatch.setattr(gui.QFileDialog, 'getExistingDirectory', lambda *args: str(tmp_path))
+    root, model_state = models
+    from mavis_track._nexus_remote import NexusRemote
+    sent = []
+    def send(self, action, name):
+        sent.append((action, name))
+        return dict(action=action, trial_name=name, status='sent_unconfirmed')
+    monkeypatch.setattr(NexusRemote, 'send', send)
+    window = gui.StereoHandTrackerGUI(model='wilor', wilor_root=root)
+    window.inference_checkbox.setChecked(False)
+    window.trial_name_edit.setText('Reach_A')
+    window.nexus_network_checkbox.setChecked(network)
+    try:
+        window.show()
+        window.start_tracking()
+        wait_until(lambda: window._wilor_session.ready.is_set(), app)
+        manager = cameras.managers[0]
+        manager._stop_lock = threading.RLock()
+        manager._shutdown = False
+        manager.recorder = None
+        manager.start_recording = MethodType(CameraManager.start_recording, manager)
+        manager.stop_recording = MethodType(CameraManager.stop_recording, manager)
+        manager.get_sync_status = lambda: dict(available=False, reason='No input edge telemetry')
+        for index, worker in enumerate(manager.workers):
+            worker.capture_settings = dict(camera_index=index)
+            original = worker.publish_frame
+            def publish(frame, original=original, index=index):
+                original(frame)
+                recorder = manager.recorder
+                if recorder is not None:
+                    recorder.frame(index, frame, dict(host_received_monotonic=time.perf_counter(),
+                                                     inference_enabled=False))
+            worker.publish_frame = publish
+        window._toggle_recording()
+        wait_until(entered.is_set, app)
+        recorder = manager.recorder
+        assert model_state.loads == 0
+        window.close()
+        assert window.isVisible() and not manager.stopped
+        count = manager.counter
+        wait_until(lambda: manager.counter > count + 3, app)
+        assert window._record_stop_thread is not None
+        gate.set()
+        wait_until(lambda: window._wilor_session is None and not window.isVisible(), app)
+        assert recorder.status()['written'] > 0 and manager.recorder is None and manager.stopped
+        import json
+        manifest = json.loads((recorder.directory / 'manifest.json').read_text())
+        assert manifest['complete'] and not manifest['input_edge_recording_supported']
+        assert manifest['trial_name'] == 'Reach_A' and recorder.directory.name.startswith('Reach_A_')
+        assert window.record_directory_edit.text() == str(tmp_path)
+        assert sent == ([('start', 'Reach_A'), ('stop', 'Reach_A')] if network else [])
+        if network:
+            logged = [json.loads(line) for line in (recorder.directory/'control_events.jsonl').read_text().splitlines()]
+            assert [row['action'] for row in logged] == ['start', 'stop']
+            assert all(row['status'] == 'sent_unconfirmed' for row in logged)
+    finally:
+        gate.set()
         window.close()
         wait_until(lambda: window._wilor_session is None, app)
 

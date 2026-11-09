@@ -20,6 +20,25 @@ class ProcessingThread(threading.Thread):
         self.error = None
         self._proc_fps = 0.0
         self._t_prev = time.perf_counter()
+        self._inference_enabled = True
+        self._revision = 0
+        self._reset_detectors = False
+        self._requested_params = None
+
+    def request_params(self, detection, tracking):
+        with self._lock:
+            self._requested_params = (detection, tracking)
+            self._revision += 1
+            self._latest_result = None
+
+    def set_inference_enabled(self, enabled):
+        with self._lock:
+            if enabled and not self._inference_enabled:
+                self._reset_detectors = True
+            self._inference_enabled = bool(enabled)
+            self._revision += 1
+            self._latest_result = None
+            self.error = None
 
     def run(self):
         while self._running:
@@ -27,9 +46,25 @@ class ProcessingThread(threading.Thread):
             if not self._running:
                 break
             try:
+                with self._lock:
+                    enabled, revision = self._inference_enabled, self._revision
+                    reset, self._reset_detectors = self._reset_detectors, False
+                    params = self._requested_params
+                    if enabled:
+                        self._requested_params = None
+                if not enabled:
+                    time.sleep(.02)
+                    continue
+                if hasattr(self.tracker, "initialize_inference"):
+                    if params is not None:
+                        self.tracker.update_mp_params(*params)
+                    elif reset and self.tracker.hands_detectors:
+                        self.tracker.update_mp_params(*self.tracker._inference_params)
+                    self.tracker.initialize_inference()
                 result = self.tracker.process_frame()
                 with self._lock:
-                    self._latest_result = result
+                    if revision == self._revision:
+                        self._latest_result = result
                 now = time.perf_counter()
                 dt = now - self._t_prev
                 self._proc_fps = 1.0 / dt if dt > 0 else 0.0
@@ -37,11 +72,13 @@ class ProcessingThread(threading.Thread):
                 time.sleep(0.001)
             except Exception as exc:
                 with self._lock:
-                    self._latest_result = None
-                    self.error = str(exc)
+                    if revision == self._revision:
+                        self._latest_result = None
+                        self.error = str(exc)
+                        self._inference_enabled = False
                 print(f"[ProcessingThread] Error: {exc}")
-                self._running = False
-                break
+                # Keep capture/recording alive. The GUI can retry inference.
+                time.sleep(.02)
 
     def get_latest(self):
         with self._lock:

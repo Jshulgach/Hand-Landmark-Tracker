@@ -1,4 +1,4 @@
-"""Build and optionally install MAVIS's illumination-capable Windows binding locally."""
+"""Build MAVIS's illumination, frame timing and OptiHub status binding locally."""
 from __future__ import annotations
 
 import argparse
@@ -64,10 +64,17 @@ with os.add_dll_directory(sys.argv[2]):
     sys.path.insert(0,sys.argv[1])
     sdk=importlib.import_module('optitrack_cam')
     assert sdk.BINDING_API_VERSION == 2
+    assert sdk.CAMERA_RECORDING_API_VERSION == 1
+    assert callable(sdk.get_sync_status)
+    assert sdk.OPTIHUB_SYNC_CONTROL_API_VERSION == 1
+    assert callable(sdk.configure_sync_preset)
+    assert callable(sdk.configure_exposure_output)
+    assert callable(sdk.Frame.timing)
+    assert callable(sdk.Camera.capture_info)
     for name in ('get_intensity','min_intensity','max_intensity','set_intensity',
                  'is_high_power_supported','is_high_power_available','get_high_power','set_high_power'):
         assert callable(getattr(sdk.Camera,name)),name
-    print('PASS: native binding API v2 imports and exposes all illumination methods; no cameras initialized.')
+    print('PASS: binding exposes illumination, frame timing and sync configuration; no cameras initialized.')
 """
     subprocess.run([sys.executable,'-B','-c',code,str(binding.parent),str(runtime)],check=True)
 

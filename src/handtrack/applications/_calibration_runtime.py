@@ -36,9 +36,9 @@ def _load_backend(backend):
     return importlib.import_module(f"handtrack.cameras.{backend}.{module}").CameraManager
 
 
-def calibrate_intrinsics(all_corners, all_ids, board, img_size, num_cameras):
+def calibrate_intrinsics(all_corners, all_ids, board, img_size, num_cameras, *, reserve_board_views=True):
     global _intrinsic_results, _reserved_indices
-    _reserved_indices = list(range(4, len(all_corners[0]), 5))
+    _reserved_indices = list(range(4, len(all_corners[0]), 5)) if reserve_board_views else []
     board_points = board.getChessboardCorners()
     _intrinsic_results = []
     for camera in range(num_cameras):
@@ -56,8 +56,11 @@ def calibrate_intrinsics(all_corners, all_ids, board, img_size, num_cameras):
     return [result.camera_matrix for result in _intrinsic_results], [result.dist_coeffs for result in _intrinsic_results]
 
 
-def calibrate_stereo_pairs(all_corners, all_ids, board, matrices, dists, img_size, num_cameras):
-    global _stereo_results, _board_validation
+def calibrate_stereo_pairs(all_corners, all_ids, board, matrices, dists, img_size, num_cameras,
+                           *, reserved_indices=None):
+    global _stereo_results, _board_validation, _reserved_indices
+    if reserved_indices is not None:
+        _reserved_indices = list(reserved_indices)
     _board_validation = None
     _stereo_results = []
     board_points = board.getChessboardCorners()
@@ -87,6 +90,19 @@ def calibrate_stereo_pairs(all_corners, all_ids, board, matrices, dists, img_siz
     return rotations, translations
 
 
+def validate_intrinsic_quality():
+    """Stop before alignment if any lens fit fails the existing quality gate."""
+    if not _intrinsic_results:
+        raise ValueError("No intrinsic validation results; alignment not started")
+    for camera, result in enumerate(_intrinsic_results):
+        errors = np.asarray(result.heldout_errors)
+        if not errors.size or not np.isfinite(errors).all():
+            raise ValueError(f"Camera {camera}: missing or non-finite intrinsic held-out errors")
+        if np.max(errors) > MAX_HELDOUT_REPROJECTION_ERROR:
+            raise ValueError(f"Camera {camera}: intrinsic held-out max {np.max(errors):.3f} px "
+                             f"exceeds {MAX_HELDOUT_REPROJECTION_ERROR:.3f} px; alignment not started")
+
+
 def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_coeffs_list,
                      R_matrices, T_vectors, *, intrinsic_results=None):
     results = intrinsic_results if intrinsic_results is not None else _intrinsic_results
@@ -94,7 +110,8 @@ def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_
             "image_sizes": _image_sizes if _image_sizes is not None else np.tile(img_size, (num_cameras, 1)),
             "camera_ids": _camera_ids if _camera_ids is not None else list(range(num_cameras)),
             "num_captures": num_captured, "coordinate_units": "meters",
-            "calibration_type": "charuco", "charuco_square_length": CHARUCO_SQUARE_LENGTH,
+            "calibration_type": "charuco", "stereo_error_metric": "joint_board_pose_point_rms",
+            "charuco_square_length": CHARUCO_SQUARE_LENGTH,
             "charuco_marker_length": CHARUCO_MARKER_LENGTH}
     if _diagnostics and all(item.get("uid") for item in _diagnostics):
         data["camera_uid_high"] = [item["uid"][0] for item in _diagnostics]
@@ -151,12 +168,42 @@ def save_calibration(num_cameras, img_size, num_captured, camera_matrices, dist_
                         board_validation_points=validation.num_points,
                         reserved_view_indices=np.asarray(_reserved_indices, dtype=int))
     data["quality_passed"] = quality
+    failures = []
+    if len(results) != num_cameras:
+        failures.append("missing intrinsic validation results")
+    for key, errors in data.items():
+        if key.startswith(("heldout_errors_", "stereo_heldout_")):
+            errors = np.asarray(errors)
+            if not errors.size or not np.isfinite(errors).all():
+                failures.append(f"{key}: missing or non-finite errors")
+            elif np.max(errors) > MAX_HELDOUT_REPROJECTION_ERROR:
+                failures.append(f"{key}: max {np.max(errors):.3f} px exceeds {MAX_HELDOUT_REPROJECTION_ERROR:.3f} px")
+    if num_cameras > 1:
+        if _board_validation is None:
+            failures.append("missing held-out board reconstruction validation")
+        else:
+            for key, limit, unit in (
+                ("board_shape_rms_mm", MAX_BOARD_SHAPE_RMS_MM, "mm"),
+                ("board_scale_error_percent", MAX_BOARD_SCALE_ERROR_PERCENT, "%"),
+                ("board_planarity_rms_mm", MAX_BOARD_PLANARITY_RMS_MM, "mm"),
+            ):
+                value = data[key]
+                if not np.isfinite(value) or abs(value) > limit:
+                    failures.append(f"{key}: {value:.3f} {unit} exceeds limit {limit:.3f} {unit}")
+            if _board_validation.num_views < 3:
+                failures.append(f"board validation needs 3 views; got {_board_validation.num_views}")
+        try:
+            solve_camera_pose_graph(num_cameras, _stereo_results)
+        except ValueError as error:
+            failures.append(f"stereo camera graph: {error}")
+    data["quality_failures"] = np.asarray(failures, dtype=str)
     destination = Path(CALIBRATION_FILE)
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + ".candidate.npz")
     np.savez_compressed(candidate, **data)
     if not quality:
-        raise ValueError(f"Calibration failed held-out quality checks; previous calibration preserved. Candidate: {candidate}")
+        details = "; ".join(failures) or "incomplete quality validation"
+        raise ValueError(f"Calibration failed held-out quality checks; previous calibration preserved. {details}. Candidate: {candidate}")
     from mavis_track.calibration import load_camera_calibration
     load_camera_calibration(candidate, count=num_cameras, image_sizes=data["image_sizes"], camera_ids=data["camera_ids"])
     backup = destination.parent / ("calib_backup_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".npz")
@@ -181,7 +228,7 @@ def main(backend):
         manager = manager_class(*args, **kwargs)
         managers.append(manager)
         return manager
-    def solve_intrinsics(*args):
+    def solve_intrinsics(*args, **kwargs):
         global _camera_ids, _image_sizes, _diagnostics
         manager = managers[-1]
         _camera_ids = getattr(manager, "camera_indices", list(range(manager.num_cameras)))
@@ -191,7 +238,7 @@ def main(backend):
         # transform; fail explicitly rather than reuse camera 0's pixel scale.
         if not np.all(_image_sizes == _image_sizes[0]):
             raise ValueError("Stereo calibration currently requires matching camera resolutions")
-        return calibrate_intrinsics(*args)
+        return calibrate_intrinsics(*args, **kwargs)
     saved = False
     def publish(*args, **kwargs):
         nonlocal saved

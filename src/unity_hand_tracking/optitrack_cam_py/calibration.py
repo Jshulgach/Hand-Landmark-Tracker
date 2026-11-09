@@ -149,8 +149,11 @@ def detect_charuco(args):
     )
 
     # We need at least 6 corners for a robust calibration frame
-    if charuco_corners is not None and len(charuco_corners) >= 6:
-        return True, (charuco_corners, charuco_ids)
+    if (charuco_corners is not None and charuco_ids is not None
+            and len(charuco_corners) >= 6
+            and len(charuco_corners) == charuco_ids.size):
+        # Retain a snapshot independent of the detector's next invocation.
+        return True, (charuco_corners.copy(), charuco_ids.copy())
     return False, (None, None)
 
 
