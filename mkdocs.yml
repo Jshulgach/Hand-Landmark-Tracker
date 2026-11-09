@@ -46,6 +46,8 @@ nav:
   - Research data: research-data.md
   - CLI: cli.md
   - Backends: backends.md
+  - OptiTrack recording: optitrack-recording.md
+  - Vicon synchronization: vicon-sync.md
   - WiLoR (experimental): wilor.md
   - Model roadmap: mmpose-comparison.md
   - Troubleshooting: troubleshooting.md

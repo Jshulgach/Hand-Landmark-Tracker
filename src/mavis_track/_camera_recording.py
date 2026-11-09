@@ -1,19 +1,20 @@
 """Independent, bounded multi-camera video writer and timing sidecars."""
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import queue
 import shutil
+import sys
 import threading
 import time
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
-from ._trial import trial_slug, utc_stamp
+
 from ._frame_diagnostics import FrameDiagnostics
+from ._trial import trial_slug, utc_stamp
 
 
 class CameraRecording:
@@ -69,10 +70,10 @@ class CameraRecording:
 
     def status(self):
         with self._lock:
-            return dict(written=self.written, dropped=self.dropped, error=self.error,
-                        pending=self._queue.qsize(), active=not self._stop.is_set(),
-                        sdk_missing=sum(s['sdk_missing'] for s in self.diagnostics.cameras.values()),
-                        sdk_discontinuities=sum(s['sdk_resets_or_duplicates'] for s in self.diagnostics.cameras.values()))
+            return {"written": self.written, "dropped": self.dropped, "error": self.error,
+                        "pending": self._queue.qsize(), "active": not self._stop.is_set(),
+                        "sdk_missing": sum(s['sdk_missing'] for s in self.diagnostics.cameras.values()),
+                        "sdk_discontinuities": sum(s['sdk_resets_or_duplicates'] for s in self.diagnostics.cameras.values())}
 
     def _submit(self, item):
         with self._lock:
@@ -97,26 +98,25 @@ class CameraRecording:
 
     def control_event(self, event, **details):
         """Low-rate trigger audit bypasses the frame queue, including after writer errors."""
-        with self._control_lock:
-            with (self.directory/'control_events.jsonl').open('a', encoding='utf-8') as stream:
-                stream.write(json.dumps(dict(event=event, host_monotonic=time.perf_counter(), **details),
-                                        allow_nan=False)+'\n')
+        with self._control_lock, (self.directory/'control_events.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(dict(event=event, host_monotonic=time.perf_counter(), **details),
+                                    allow_nan=False)+'\n')
 
     def _write_manifest(self, complete):
-        data = dict(schema="mavis-camera-video-v1", complete=complete,
-                    started_utc=self.started_utc,
-                    trial_name=self.trial_name, session_metadata=self.session_metadata,
-                    calibration=self.calibration, video_files=dict(self.video_files),
-                    software=dict(python=sys.version.split()[0], opencv=cv2.__version__),
-                    host_started_monotonic=self.started, timestamp_clock="time.perf_counter seconds",
-                    nominal_video_fps=self.fps, camera_ids=self.camera_ids,
-                    video_codec=self.codec,
-                    camera_settings=self.camera_settings,
-                    video="Timestamped per-camera AVI (no tracking overlays)",
-                    timing="frames.jsonl; nominal video FPS does not preserve variable timing",
-                    sync="sync.jsonl contains sampled configuration, not electrical input edges",
-                    input_edge_recording_supported=False,
-                    frames_written=self.written, queue_items_dropped=self.dropped, error=self.error)
+        data = {"schema": "mavis-camera-video-v1", "complete": complete,
+                    "started_utc": self.started_utc,
+                    "trial_name": self.trial_name, "session_metadata": self.session_metadata,
+                    "calibration": self.calibration, "video_files": dict(self.video_files),
+                    "software": {"python": sys.version.split()[0], "opencv": cv2.__version__},
+                    "host_started_monotonic": self.started, "timestamp_clock": "time.perf_counter seconds",
+                    "nominal_video_fps": self.fps, "camera_ids": self.camera_ids,
+                    "video_codec": self.codec,
+                    "camera_settings": self.camera_settings,
+                    "video": "Timestamped per-camera AVI (no tracking overlays)",
+                    "timing": "frames.jsonl; nominal video FPS does not preserve variable timing",
+                    "sync": "sync.jsonl contains sampled configuration, not electrical input edges",
+                    "input_edge_recording_supported": False,
+                    "frames_written": self.written, "queue_items_dropped": self.dropped, "error": self.error}
         data["frames_per_camera"] = dict(self.frames_per_camera)
         data['frame_diagnostics'] = self.diagnostics.summary()
         data['queue_drops_by_kind'] = dict(self.dropped_by_kind)
@@ -130,8 +130,8 @@ class CameraRecording:
             with (self.directory / "frames.jsonl").open("w", encoding="utf-8") as frames, \
                     (self.directory / "sync.jsonl").open("w", encoding="utf-8") as sync, \
                     (self.directory / "events.jsonl").open("w", encoding="utf-8") as events:
-                events.write(json.dumps(dict(event='recording_started', host_monotonic=self.started,
-                                             utc=self.started_utc, trial_name=self.trial_name)) + '\n')
+                events.write(json.dumps({"event": 'recording_started', "host_monotonic": self.started,
+                                             "utc": self.started_utc, "trial_name": self.trial_name}) + '\n')
                 events.flush()
                 while not self._stop.is_set() or not self._queue.empty():
                     try:
@@ -174,9 +174,9 @@ class CameraRecording:
                         if shutil.disk_usage(self.directory).free < 64 * 1024 * 1024:
                             raise RuntimeError("Recording stopped: less than 64 MiB of free disk space")
                         self._write_manifest(False)
-                events.write(json.dumps(dict(event='recording_stopped', host_monotonic=time.perf_counter(),
-                                             frames_written=self.written)) + '\n')
-        except Exception as exc:
+                events.write(json.dumps({"event": 'recording_stopped', "host_monotonic": time.perf_counter(),
+                                             "frames_written": self.written}) + '\n')
+        except Exception as exc:  # noqa: BLE001 - Recorder boundary must report native and finalization failures.
             with self._lock:
                 self.error = str(exc)
             self._stop.set()
@@ -184,23 +184,23 @@ class CameraRecording:
             for writer in writers.values():
                 try:
                     writer.release()
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - Recorder boundary must report native and finalization failures.
                     with self._lock:
                         self.error = f"Cannot finalize video: {exc}"
             if not self.written and not self.error:
                 with self._lock:
                     self.error = "No camera frames were recorded"
             try:
-                (self.directory / 'diagnostics.json').write_text(json.dumps(dict(
-                    cameras=self.diagnostics.summary(), queue_drops_by_kind=self.dropped_by_kind,
-                    error=self.error, note='SDK gaps do not count electrical input pulses.'), indent=2) + '\n',
+                (self.directory / 'diagnostics.json').write_text(json.dumps({
+                    "cameras": self.diagnostics.summary(), "queue_drops_by_kind": self.dropped_by_kind,
+                    "error": self.error, "note": 'SDK gaps do not count electrical input pulses.'}, indent=2) + '\n',
                     encoding='utf-8')
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - Recorder boundary must report native and finalization failures.
                 with self._lock:
                     self.error = f"Cannot finalize recording: {exc}"
             try:
                 self._write_manifest(self._stop.is_set() and not self.error)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - Recorder boundary must report native and finalization failures.
                 with self._lock:
                     self.error = f"Cannot finalize manifest: {exc}"
 

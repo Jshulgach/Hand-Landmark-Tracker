@@ -8,9 +8,9 @@ class FrameDiagnostics:
         self._previous = {}
 
     def observe(self, index, metadata):
-        stats = self.cameras.setdefault(str(index), dict(frames=0, sdk_gaps=0, sdk_missing=0,
-            sdk_resets_or_duplicates=0, sdk_timing_frames=0, host_nonmonotonic=0,
-            max_host_interval_seconds=0., first_host_time=None, last_host_time=None))
+        stats = self.cameras.setdefault(str(index), {'frames': 0, 'sdk_gaps': 0, 'sdk_missing': 0,
+            'sdk_resets_or_duplicates': 0, 'sdk_timing_frames': 0, 'host_nonmonotonic': 0,
+            'max_host_interval_seconds': 0., 'first_host_time': None, 'last_host_time': None})
         stats['frames'] += 1
         previous = self._previous.setdefault(index, {})
         frame_id = metadata.get('sdk_frame_id')

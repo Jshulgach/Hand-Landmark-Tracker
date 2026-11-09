@@ -18,6 +18,18 @@ Every fifth capture is reserved from all model fitting for a separate reconstruc
 board check. Default gates require at least three reserved views, shape RMS at most
 2 mm, scale error at most 2%, and planarity RMS at most 1 mm. These are commissioning
 gates, not claims of physical tracking accuracy.
+A failed run prints each rejected camera/pair or 3D board metric with its limit,
+keeps the published calibration intact, and saves the rejected candidate.
+Low per-camera RMS does not guarantee consistent stereo poses or accurate
+triangulation. To inspect the last candidate (including files from older versions):
+
+```powershell
+./.venv-wilor/Scripts/python.exe -m mavis_track inspect-calibration --backend optitrack --candidate
+```
+
+Inspection reports failed status for a rejected candidate; it never publishes it.
+The failure reasons and thresholds are saved with new candidates.
+
 Calibration count, source indices, image sizes, and matrices are checked when loaded.
 Legacy files lacking identity or size metadata produce explicit warnings.
 
@@ -97,6 +109,15 @@ The OptiTrack tracking window supports point-sized text, monitor DPI changes, a
 resizable sidebar and a text zoom control. Camera tiles use an adaptive grid.
 **Fit full image** preserves every pixel; **Fill area** crops the displayed edges
 only. Display zoom/cropping never changes detector input or calibration geometry.
+
+OptiTrack auto-capture requires the board to remain still for at least 0.5 seconds
+in every camera (corner displacement at most 1 pixel from the settling anchor).
+Use a rigid, flat board, hold each pose steady, then change angle/position after
+a capture. The capture checks host frame freshness (250 ms), new frames from all
+cameras, and receipt-time spread (50 ms). These reject unsuitable frame batches;
+host receipt time does not establish hardware exposure synchronization. The
+preview explains when it is waiting for a steady board or fresh frames. Each
+camera uses its own ChArUco detector during concurrent detection.
 
 The OptiTrack calibration preview uses the same scalable camera tiles, readable
 text and a text zoom control. Its compact footer lists these keyboard commands:

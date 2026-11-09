@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Explain rejected calibration candidates with per-camera/stereo held-out
+  maxima, 3D board metrics, limits and saved failure reasons; add candidate
+  inspection and return a clear failure status without an expected-quality traceback.
+- Require a steady ChArUco board and fresh, distinct, closely received frames
+  before OptiTrack auto-capture; give each camera its own detector. Pass saved
+  camera UID diagnostics to final validation. Preserve publication quality gates
+  and the previously validated calibration.
+
 - Show WiLoR startup stages, elapsed time, selected CPU/CUDA device, completed
   batches, and zero-detection/raw-preview status. Distinguish model loading from
   first inference; print initialization/inference exception chains and the

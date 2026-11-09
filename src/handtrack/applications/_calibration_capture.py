@@ -2,22 +2,30 @@
 import concurrent.futures
 import time
 
+import numpy as np
+
 from ._calibration_preview import create_calibration_preview
-from ._calibration_session import CalibrationSession, MIN_STAGE_CAPTURES, observation_path
 from ._calibration_runtime import validate_intrinsic_quality
+from ._calibration_session import (
+    MIN_STAGE_CAPTURES,
+    CalibrationSession,
+    observation_path,
+)
 
 
 def _collect(module, manager, preview, executor, detectors, session, checkpoint):
     """Collect one stage, keeping the preview responsive during detection."""
     controls = preview.controls
     countdown = controls.countdown
+    gate = BoardCaptureGate()
     while not controls.cancelled:
         countdown.waiting_message = (
             f'Waiting for board in camera {session.camera} — other cameras are not required'
             if session.phase == 'intrinsics' else
             'Waiting for an unfinished camera pair with at least 6 common corners')
         batch_started = time.monotonic()
-        frames = manager.get_all_frames()
+        frames, stamps = _capture_snapshots(manager)
+        snapshot_now = time.perf_counter()
         futures = [executor.submit(module.detect_charuco, (frame, detector))
                    for frame, detector in zip(frames, detectors)]
         while not all(future.done() for future in futures):
@@ -33,19 +41,31 @@ def _collect(module, manager, preview, executor, detectors, session, checkpoint)
         target = session.choose_target(results)
         if target != session.active_target:
             countdown.reset()
+            gate.reset()
             session.active_target = target
         ready = (target is not None and controls.capture_ready
                  and batch_started >= controls.last_change)
+        guidance = ''
+        if ready:
+            selected_stamps = [stamps[camera] for camera in target] if stamps is not None else None
+            steady, guidance = gate.check(
+                [results[camera] for camera in target],
+                snapshot_now if stamps is not None else time.monotonic(), selected_stamps)
+            ready = steady
+        else:
+            gate.reset()
+        controls.capture_message = guidance
         countdown.update(time.monotonic(), ready)
         captured = ready and countdown.due(batch_started) and not controls.finished
         if captured:
             session.capture(target, results)
             countdown.reset()
+            gate.reset()
             checkpoint()
             print('Captured — ' + session.progress())
 
         advance = False
-        message = session.progress()
+        message = session.progress() + (f' {guidance}' if guidance else '')
         if session.phase == 'intrinsics':
             size = len(session.intrinsic_corners[session.camera])
             if size >= session.target or (controls.finished and size >= MIN_STAGE_CAPTURES):
@@ -73,6 +93,66 @@ def _collect(module, manager, preview, executor, detectors, session, checkpoint)
             message = 'Captured! ' + message
         preview.show_frames(display, message)
     return False
+
+
+class BoardCaptureGate:
+    """Require several observations of the same stationary board pose.
+
+    Host receipt timestamps reject stale/repeated/skewed batches; they do not
+    establish hardware exposure synchronization.
+    """
+
+    def __init__(self, stable_seconds=.5, max_motion_px=1.0, max_skew=.05):
+        self.stable_seconds = stable_seconds
+        self.max_motion_px = max_motion_px
+        self.max_skew = max_skew
+        self.reset()
+
+    def reset(self):
+        self.anchor = None
+        self.since = None
+        self.last_stamps = None
+
+    def check(self, results, now, stamps=None):
+        if not all(found for found, _ in results):
+            self.reset()
+            return False, "Board must be visible in every camera"
+        if stamps is not None:
+            times = np.asarray(stamps, dtype=float)
+            if (not np.isfinite(times).all() or np.any(now - times < 0)
+                    or np.any(now - times > .25) or np.ptp(times) > self.max_skew):
+                self.reset()
+                return False, "Waiting for fresh camera frames with close receipt times"
+            if self.last_stamps is not None and any(
+                    stamp <= old for stamp, old in zip(stamps, self.last_stamps)):
+                return False, "Waiting for a new frame from every camera"
+            self.last_stamps = tuple(stamps)
+        current = [(np.asarray(corners).reshape(-1, 2).copy(),
+                    np.asarray(ids).reshape(-1).copy()) for _, (corners, ids) in results]
+        still = self.anchor is not None and len(current) == len(self.anchor)
+        if still:
+            for (points, ids), (old_points, old_ids) in zip(current, self.anchor):
+                common, ii, jj = np.intersect1d(ids, old_ids, return_indices=True)
+                if (len(common) < 6 or
+                        np.max(np.linalg.norm(points[ii] - old_points[jj], axis=1)) > self.max_motion_px):
+                    still = False
+                    break
+        if not still:
+            self.anchor, self.since = current, now
+        ready = now - self.since >= self.stable_seconds
+        return ready, ("Board steady" if ready else "Hold board still for 0.5 s")
+
+
+def _capture_snapshots(manager):
+    workers = getattr(manager, "workers", ())
+    if workers and all(hasattr(worker, "get_snapshot") for worker in workers):
+        snapshots = [worker.get_snapshot() for worker in workers]
+        frames = [frame if frame is not None else np.zeros((worker.height, worker.width, 3), np.uint8)
+                  for worker, (frame, _) in zip(workers, snapshots)]
+        stamps = [stamp if frame is not None and stamp is not None else float("nan")
+                  for frame, stamp in snapshots]
+        return frames, stamps
+    return manager.get_all_frames(), None
 
 
 def run_capture(module):
@@ -150,7 +230,6 @@ def run_capture(module):
                     session.alignment_corners, session.alignment_ids, board,
                     matrices, dists, image_size, count, reserved_indices=session.reserved_indices)
             else:
-                import numpy as np
                 rotations, translations = [np.eye(3)], [np.zeros((3, 1))]
             captures = sum(map(len, session.intrinsic_corners)) + len(session.alignment_corners[0])
             module.save_calibration(count, image_size, captures, matrices, dists, rotations, translations)

@@ -44,6 +44,6 @@ class NexusRemote:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
             client.settimeout(.5)
             client.sendto(packet, (self.address, self.port))
-        return dict(action=action, packet_id=packet_id, trial_name=trial_name,
-                    address=self.address, port=self.port, host_sent_monotonic=time.perf_counter(),
-                    status='sent_unconfirmed', note='UDP send does not confirm Nexus capture or frame alignment')
+        return {'action': action, 'packet_id': packet_id, 'trial_name': trial_name,
+                    'address': self.address, 'port': self.port, 'host_sent_monotonic': time.perf_counter(),
+                    'status': 'sent_unconfirmed', 'note': 'UDP send does not confirm Nexus capture or frame alignment'}

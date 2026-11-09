@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import itertools
 import json
 import math
 from pathlib import Path
@@ -42,12 +43,12 @@ def load_vicon(path):
         raise ValueError(f"Unsupported C3D coordinate units: {units}")
     first = int(data['header']['points']['first_frame'])
     analog = data['parameters'].get('ANALOG', {})
-    return dict(path=str(path), sha256=file_hash(path),
-                rate=rate, first_frame=first, last_frame=first + len(points)-1,
-                markers=list(data['parameters']['POINT']['LABELS']['value']), points=points * scale,
-                analog_labels=list(analog.get('LABELS', {}).get('value', [])),
-                analog_rate=float(analog.get('RATE', {}).get('value', [0])[0]),
-                analog=np.asarray(data['data']['analogs'])[0])
+    return {'path': str(path), 'sha256': file_hash(path),
+                'rate': rate, 'first_frame': first, 'last_frame': first + len(points)-1,
+                'markers': list(data['parameters']['POINT']['LABELS']['value']), 'points': points * scale,
+                'analog_labels': list(analog.get('LABELS', {}).get('value', [])),
+                'analog_rate': float(analog.get('RATE', {}).get('value', [0])[0]),
+                'analog': np.asarray(data['data']['analogs'])[0]}
 
 
 def load_session(directory):
@@ -96,12 +97,12 @@ def exposure_edges(vicon, channel, threshold):
     for i, sample in enumerate(samples):
         endings = falling[falling > sample]
         end = int(endings[0]) if len(endings) else None
-        result.append(dict(edge_index=i, analog_sample=int(sample),
-            vicon_frame=vicon['first_frame'] + sample/vicon['analog_rate'] * vicon['rate'],
-            vicon_time_seconds=sample/vicon['analog_rate'],
-            pulse_width_seconds=(end-sample)/vicon['analog_rate'] if end is not None else None,
-            midpoint_vicon_frame=vicon['first_frame']+(end+sample)/2/vicon['analog_rate']*vicon['rate'] if end is not None else None,
-            truncated=end is None))
+        result.append({'edge_index': i, 'analog_sample': int(sample),
+            'vicon_frame': vicon['first_frame'] + sample/vicon['analog_rate'] * vicon['rate'],
+            'vicon_time_seconds': sample/vicon['analog_rate'],
+            'pulse_width_seconds': (end-sample)/vicon['analog_rate'] if end is not None else None,
+            'midpoint_vicon_frame': vicon['first_frame']+(end+sample)/2/vicon['analog_rate']*vicon['rate'] if end is not None else None,
+            'truncated': end is None})
     return result
 
 
@@ -118,20 +119,20 @@ def read_anchors(path):
         frame = float(row['vicon_frame'])
         if not math.isfinite(frame):
             raise ValueError("Anchor Vicon frames must be finite")
-        result.append(dict(camera_index=int(row['camera_index']), sdk_frame_id=int(row['sdk_frame_id']),
-                           vicon_frame=frame, role=role, source=row.get('source', 'user-supplied')))
+        result.append({'camera_index': int(row['camera_index']), 'sdk_frame_id': int(row['sdk_frame_id']),
+                           'vicon_frame': frame, 'role': role, 'source': row.get('source', 'user-supplied')})
     return result
 
 
 def _camera_axis(rows, rate):
     ids = [r.get('sdk_frame_id') for r in rows]
-    if any(i is None for i in ids) or any(b <= a for a, b in zip(ids, ids[1:])):
+    if any(i is None for i in ids) or any(b <= a for a, b in itertools.pairwise(ids)):
         return None, None, 'SDK IDs unavailable, repeated or reset; explicit segment alignment required'
     hardware = [r.get('hardware_timestamp_ticks') for r in rows]
     frequencies = [r.get('hardware_timestamp_frequency') for r in rows]
     if (all(r.get('hardware_timestamp_valid') for r in rows)
             and all(t is not None for t in hardware) and all(f is not None and f > 0 for f in frequencies)
-            and len(set(frequencies)) == 1 and all(b > a for a, b in zip(hardware, hardware[1:]))):
+            and len(set(frequencies)) == 1 and all(b > a for a, b in itertools.pairwise(hardware))):
         return np.asarray([t-hardware[0] for t in hardware], dtype=float)/frequencies[0], 'hardware_clock', None
     return (np.asarray(ids, dtype=float)-ids[0])/rate, 'sdk_id_at_nominal_rate', None
 
@@ -152,14 +153,14 @@ def analyze_session(directory, *, vicon_path=None, anchors_path=None, expected_r
     if unknown:
         raise ValueError(f"Anchors refer to unrecorded cameras: {sorted(unknown)}")
     diagnostics = FrameDiagnostics()
-    report = dict(schema='mavis-vicon-alignment-v1', trial_name=manifest.get('trial_name'),
-                  session=str(directory), complete=manifest.get('complete', False),
-                  frames_sha256=file_hash(directory/'frames.jsonl'),
-                  manifest_sha256=file_hash(directory/'manifest.json'), calibration=manifest.get('calibration'),
-                  expected_camera_rate=expected_rate, tolerance_ms=tolerance_ms,
-                  queue_drops=manifest.get('queue_items_dropped', 0), cameras={},
-                  anchors=anchors, anchors_sha256=hashlib.sha256(Path(anchors_path).read_bytes()).hexdigest() if anchors_path else None,
-                  warnings=['File-name timestamps and host receipt times are not exposure synchronization.'])
+    report = {'schema': 'mavis-vicon-alignment-v1', 'trial_name': manifest.get('trial_name'),
+                  'session': str(directory), 'complete': manifest.get('complete', False),
+                  'frames_sha256': file_hash(directory/'frames.jsonl'),
+                  'manifest_sha256': file_hash(directory/'manifest.json'), 'calibration': manifest.get('calibration'),
+                  'expected_camera_rate': expected_rate, 'tolerance_ms': tolerance_ms,
+                  'queue_drops': manifest.get('queue_items_dropped', 0), 'cameras': {},
+                  'anchors': anchors, 'anchors_sha256': hashlib.sha256(Path(anchors_path).read_bytes()).hexdigest() if anchors_path else None,
+                  'warnings': ['File-name timestamps and host receipt times are not exposure synchronization.']}
     if vicon:
         report['vicon'] = {key: vicon[key] for key in ('path', 'sha256', 'rate', 'first_frame', 'last_frame')}
     mapping = []
@@ -168,9 +169,9 @@ def analyze_session(directory, *, vicon_path=None, anchors_path=None, expected_r
             diagnostics.observe(camera, dict(row))
         stamps = np.asarray([r['host_received_monotonic'] for r in rows], float)
         intervals = np.diff(stamps)
-        stats = dict(status='unmapped', frames=len(rows),
-                     max_delivery_interval_ms=float(max(intervals, default=0)*1000),
-                     delivery_jitter_p95_ms=float(np.percentile(abs(intervals-1/expected_rate), 95)*1000) if len(intervals) else None)
+        stats = {'status': 'unmapped', 'frames': len(rows),
+                     'max_delivery_interval_ms': float(max(intervals, default=0)*1000),
+                     'delivery_jitter_p95_ms': float(np.percentile(abs(intervals-1/expected_rate), 95)*1000) if len(intervals) else None}
         report['cameras'][str(camera)] = stats
         axis, basis, issue = _camera_axis(rows, expected_rate)
         selected = [a for a in anchors if a['camera_index'] == camera]
@@ -184,9 +185,9 @@ def analyze_session(directory, *, vicon_path=None, anchors_path=None, expected_r
         if issue or not fit or vicon is None:
             stats['reason'] = issue or 'Supply explicit fit anchors and a Vicon C3D file'
             for row in rows:
-                mapping.append(dict(camera_index=camera, video_frame_index=row['video_frame_index'],
-                                    sdk_frame_id=row.get('sdk_frame_id'), vicon_frame='', vicon_time_seconds='',
-                                    estimated_frame='', confidence='unmapped'))
+                mapping.append({'camera_index': camera, 'video_frame_index': row['video_frame_index'],
+                                    'sdk_frame_id': row.get('sdk_frame_id'), 'vicon_frame': '', 'vicon_time_seconds': '',
+                                    'estimated_frame': '', 'confidence': 'unmapped'})
             continue
         anchor_ids = [a['sdk_frame_id'] for a in selected]
         if len(set(anchor_ids)) != len(anchor_ids):
@@ -222,9 +223,9 @@ def analyze_session(directory, *, vicon_path=None, anchors_path=None, expected_r
                 confidence = 'extrapolated_estimate'
             if not in_range or error_ms > tolerance_ms:
                 confidence = 'outside_export' if not in_range else 'between_mocap_samples'
-            result = dict(camera_index=camera, video_frame_index=row['video_frame_index'],
-                          sdk_frame_id=row.get('sdk_frame_id'), vicon_frame=nearest if in_range and error_ms <= tolerance_ms else '',
-                          vicon_time_seconds=float(stamp), estimated_frame=fractional, confidence=confidence)
+            result = {'camera_index': camera, 'video_frame_index': row['video_frame_index'],
+                          'sdk_frame_id': row.get('sdk_frame_id'), 'vicon_frame': nearest if in_range and error_ms <= tolerance_ms else '',
+                          'vicon_time_seconds': float(stamp), 'estimated_frame': fractional, 'confidence': confidence}
             mapping.append(result)
             if result['vicon_frame'] != '':
                 used_frames.setdefault(nearest, []).append(result)
@@ -245,13 +246,13 @@ def analyze_session(directory, *, vicon_path=None, anchors_path=None, expected_r
         phases = np.asarray([edge['vicon_frame']-vicon['first_frame'] for edge in edges]) % 1
         center = float(np.angle(np.mean(np.exp(2j*np.pi*phases)))/(2*np.pi) % 1) if len(phases) else 0
         deviations = ((phases-center+.5) % 1 - .5)/vicon['rate']*1000
-        report['exposure_signal'] = dict(channel=exposure_channel, threshold=threshold,
-            analog_rate=vicon['analog_rate'], edges=len(edges),
-            sample_resolution_ms=1000/vicon['analog_rate'],
-            phase_within_vicon_frame_ms=center/vicon['rate']*1000 if len(phases) else None,
-            phase_deviation_p95_ms=float(np.percentile(abs(deviations), 95)) if len(phases) else None,
-            median_period_seconds=float(np.median(periods)) if len(periods) else None,
-            note='Sampled threshold crossings; narrow or clipped pulses may be missed. Not automatically paired to images.')
+        report['exposure_signal'] = {'channel': exposure_channel, 'threshold': threshold,
+            'analog_rate': vicon['analog_rate'], 'edges': len(edges),
+            'sample_resolution_ms': 1000/vicon['analog_rate'],
+            'phase_within_vicon_frame_ms': center/vicon['rate']*1000 if len(phases) else None,
+            'phase_deviation_p95_ms': float(np.percentile(abs(deviations), 95)) if len(phases) else None,
+            'median_period_seconds': float(np.median(periods)) if len(periods) else None,
+            'note': 'Sampled threshold crossings; narrow or clipped pulses may be missed. Not automatically paired to images.'}
     _write_csv(output / 'frame_mapping.csv', mapping,
                ['camera_index', 'video_frame_index', 'sdk_frame_id', 'vicon_frame',
                 'vicon_time_seconds', 'estimated_frame', 'confidence'])

@@ -1,7 +1,7 @@
 name: OptiTrack binding
 on:
   push:
-    branches: [codex/flex3-illumination]
+    branches: [main, codex/flex3-illumination]
     paths:
       - .github/workflows/optitrack-binding.yml
       - external/build_optitrack.py

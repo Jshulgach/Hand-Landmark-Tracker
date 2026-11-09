@@ -59,11 +59,11 @@ def test_failed_quality_candidate_preserves_previous_calibration(
         candidate_heldout_rms=np.array([2.0]),
     )
 
-    with pytest.raises(ValueError, match="heldout_errors_0: max 2.000 px exceeds 1.000 px"):
+    with pytest.raises(ValueError, match=r"Camera 0: held-out max 2.000 px \(limit 1.000 px"):
         _calibration_runtime.save_calibration(
             1, (1280, 1024), 30, [np.eye(3)], [np.zeros((1, 5))],
             [np.eye(3)], [np.zeros((3, 1))], intrinsic_results=[result])
     assert published.read_bytes() == b"known-good-calibration"
     with np.load(tmp_path / "latest.npz.candidate.npz", allow_pickle=False) as data:
         assert not data["quality_passed"].item()
-        assert "heldout_errors_0" in data["quality_failures"][0]
+        assert "Camera 0: held-out max 2.000 px" in data["quality_failures"][0]
