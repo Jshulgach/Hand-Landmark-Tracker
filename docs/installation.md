@@ -125,7 +125,7 @@ and verify the expected camera count. An unset SDK environment variable is
 normal when the checkout runtime is found automatically.
 
 
-## Install the prebuilt illumination binding
+## Install the prebuilt camera binding
 
 Close MAVIS and any Python process using the OptiTrack binding. With the
 **Python 3.11 x64** tracking environment active, update the checkout and run:
@@ -138,7 +138,7 @@ python -m mavis_track gui --backend optitrack
 ```
 
 The installer downloads the small
-[binding API v2 release](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-v2),
+[sync-capable binding release](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-sync-v1),
 verifies its pinned ZIP and extension checksums, checks native imports in a
 separate process, then installs it beside the existing SDK DLL. It preserves the
 original binding as a backup and rolls back if switching the files fails.
@@ -159,7 +159,18 @@ For an offline copy of the same release ZIP:
 python external/setup_optitrack.py --binding-zip "D:/downloads/optitrack-binding-cp311-win_amd64.zip"
 ```
 
-After restart, `optitrack:illumination` should report that the binding is ready.
+This release retains illumination API v2 and adds frame metadata API v1 plus
+OptiHub sync-control API v1: SDK frame IDs/timestamps, camera metadata, sync
+configuration readback, external/internal 50 Hz presets and exposure timing output.
+The older illumination-only release remains available at its original tag.
+
+After restart, `doctor` should report `optitrack:illumination`,
+`optitrack:frame-timing` and `optitrack:sync-control` as binding ready.
+This verifies available entrypoints; it does not measure electrical lock or
+exposure alignment. Apply the desired preset in **Recording / sync setup…**
+after starting cameras. See [recording and synchronization](optitrack-recording.md).
+
+`optitrack:illumination` reports that the binding is ready.
 Start capture to query the camera/hub capabilities, then use **Max available**
 or the individual controls. The installer does not turn the LEDs up automatically.
 

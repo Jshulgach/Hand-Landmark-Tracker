@@ -1,5 +1,6 @@
 """Local capture commands must preserve the existing recording lifecycle."""
 import json
+import select
 import socket
 from types import SimpleNamespace
 
@@ -83,12 +84,14 @@ def test_loopback_transport_rejects_bad_packets_and_recovers():
             client.settimeout(1)
             for packet in (b'not json', b'[]', b'{"action":"unknown"}'):
                 client.sendto(packet, listener.socket.getsockname())
+                assert select.select([listener.socket], [], [], 2)[0], "Local command was not delivered"
                 listener.poll()
                 assert not json.loads(client.recv(4096))['ok']
             for action in ('start', 'status', 'stop'):
                 client.sendto(json.dumps({'action': action, 'trial_name': 'Reach01',
                                           'request_id': action}).encode(),
                               listener.socket.getsockname())
+                assert select.select([listener.socket], [], [], 2)[0], "Local command was not delivered"
                 listener.poll()
                 result = json.loads(client.recv(4096))
                 assert result['ok'] and result['request_id'] == action

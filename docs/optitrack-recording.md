@@ -65,7 +65,7 @@ or remap calibration.
 
 The original binding can record videos and host timing. Its metadata explicitly
 sets `sdk_timing_available` to false, and the GUI reports sync configuration as
-unavailable until the binding is rebuilt. Build/import verification does not
+unavailable until the extended binding is installed. Build/import verification does not
 validate timing against physical exposures.
 
 Capture reads sequential SDK frames while recording instead of draining them
@@ -134,7 +134,20 @@ the previous settings if application/readback fails.
 frequency. Recordings still require an independent exposure-alignment check and
 the GUI's own Start/Stop Recording actions.
 
-## Build the extended native binding
+## Install or build the extended native binding
+
+On a configured Windows/Python 3.11 x64 tracking PC, close MAVIS and install the
+[prebuilt sync-capable binding](installation.md#install-the-prebuilt-camera-binding):
+
+```powershell
+python external/setup_optitrack.py --upgrade-binding
+python -m mavis_track doctor --backend optitrack --gui
+```
+
+This installs the verified extension without a compiler. The matching legacy
+CameraLibrary DLL and USB drivers remain prerequisites.
+
+To build from source instead:
 
 Close MAVIS and use the Python 3.11 x64 build environment described in
 [the local SDK guide](https://github.com/Jshulgach/Hand-Landmark-Tracker/blob/main/external/README.md#illumination-binding-upgrade), with

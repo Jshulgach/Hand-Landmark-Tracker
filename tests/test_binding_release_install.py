@@ -168,3 +168,45 @@ def test_http_errors_do_not_switch_tls_clients(monkeypatch,release):
     monkeypatch.setattr(installer,'download_with_windows_tls',unexpected)
     with pytest.raises(urllib.error.URLError):
         installer.download_bundle()
+
+
+@pytest.mark.parametrize("missing", [None, "recording_version", "sync_setter", "exposure_output", "frame_timing"])
+def test_native_probe_requires_sync_and_frame_extensions(monkeypatch, tmp_path, missing):
+    staging = tmp_path/"staging"
+    staging.mkdir()
+    source = """
+BINDING_API_VERSION = 2
+CAMERA_RECORDING_API_VERSION = 1
+OPTIHUB_SYNC_CONTROL_API_VERSION = 1
+def get_sync_status(): pass
+def configure_sync_preset(): pass
+def configure_exposure_output(): pass
+class Frame:
+    def timing(self): pass
+class Camera:
+    def capture_info(self): pass
+"""
+    for name in ("get_intensity", "min_intensity", "max_intensity", "set_intensity",
+                 "is_high_power_supported", "is_high_power_available", "get_high_power", "set_high_power"):
+        source += f"    def {name}(self): pass\n"
+    changes = {"recording_version": "CAMERA_RECORDING_API_VERSION = 0",
+               "sync_setter": "del configure_sync_preset",
+               "exposure_output": "del configure_exposure_output",
+               "frame_timing": "del Frame.timing"}
+    if missing:
+        source += changes[missing]+"\n"
+    (staging/"optitrack_cam.py").write_text(source)
+    real_run = installer.subprocess.run
+    def run(command, **kwargs):
+        command = list(command)
+        # The test module is pure Python; only emulate Windows' DLL-directory
+        # context so the actual subprocess capability checks run on every OS.
+        command[3] = ("import os, contextlib; "
+                      "os.add_dll_directory=lambda path: contextlib.nullcontext()\n") + command[3]
+        return real_run(command, **kwargs)
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    if missing:
+        with pytest.raises(RuntimeError, match="Native binding verification failed"):
+            installer.verify_native(staging, tmp_path)
+    else:
+        installer.verify_native(staging, tmp_path)
