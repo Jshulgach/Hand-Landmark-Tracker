@@ -31,6 +31,43 @@ Official references: [Nexus output configuration](https://help.vicon.com/space/N
 
 ## Start and stop a named trial
 
+### Optional separate controller on the Nexus PC
+
+The standalone controller operates the running MAVIS GUI over loopback UDP.
+MAVIS starts its video writer before sending the existing Nexus start request;
+on stop it requests Nexus stop before finishing video files. Nexus requests
+remain unconfirmed. This controls trial boundaries, not exposure alignment.
+Keep the Lock Lab / OptiHub hardware synchronization configured as above.
+
+In PowerShell, opt in to the MAVIS listener before launching the camera GUI:
+
+```powershell
+$env:MAVIS_CAPTURE_CONTROL_PORT = '5015'
+handtrack-optitrack-gui
+```
+
+In MAVIS, choose the video output folder, start cameras (inference may be off),
+and enable **Send Nexus start/stop over network** in recording/sync setup.
+For Nexus on this PC, use `127.0.0.1`, port `30`. In Nexus configure network
+start/stop to Receive and arm capture; verify loopback reception on the installed
+Nexus version before collecting trials. The Nexus session/database stays in Nexus.
+
+In a second terminal with the same Python environment, run:
+
+```powershell
+python -m mavis_track._capture_controller
+```
+
+Enter the trial name and use **Start both recordings** / **Stop both recordings**.
+After reinstalling the package, `mavis-capture-controller` is also available.
+The listener accepts only local traffic and is disabled unless the environment
+variable is set. The controller defaults to port 5015 (`--port` changes it).
+Only run one controller. Commands are not automatically retried; if a reply is
+lost, inspect MAVIS and Nexus before issuing another command. Closing the
+controller leaves recording running. Camera readiness and recording-file health
+must still be checked in MAVIS; a reply confirms MAVIS command handling, not
+Nexus capture or hardware synchronization.
+
 Enter the same trial name used by Nexus and select a video output parent folder.
 Each capture gets a unique subdirectory such as
 `Reach01_20261109T153000_123456Z_a1b2c3d4`. Each video filename includes the trial,

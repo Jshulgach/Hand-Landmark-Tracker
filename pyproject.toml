@@ -65,6 +65,7 @@ Documentation = "https://jshulgach.github.io/Hand-Landmark-Tracker/"
 Changelog = "https://github.com/jshulgach/Hand-Landmark-Tracker/blob/main/CHANGELOG.md"
 
 [project.scripts]
+mavis-capture-controller = "mavis_track._capture_controller:main"
 mavis-track = "handtrack.applications._cli:main"
 mavis-doctor = "handtrack.applications._doctor:main"
 mavis-inspect-calibration = "handtrack.applications._inspect_calibration:main"

@@ -270,6 +270,19 @@ class StereoHandTrackerGUI(QMainWindow):
         self._display_refresh_timer.timeout.connect(self._refresh_display)
         self.init_ui()
         self.setup_timer()
+        self._capture_control = None
+        control_port = os.environ.get('MAVIS_CAPTURE_CONTROL_PORT')
+        if control_port:
+            from mavis_track._capture_control import CaptureControl
+            try:
+                self._capture_control = CaptureControl(self, int(control_port))
+            except (OSError, ValueError, OverflowError) as exc:
+                self.record_status.setText(f'Local capture control unavailable: {exc}')
+                print(f'[Capture control] {exc}')
+            else:
+                self._capture_control_timer = QTimer(self)
+                self._capture_control_timer.timeout.connect(self._capture_control.poll)
+                self._capture_control_timer.start(50)
         # Auto-start broadcasting after UI is initialized
         if model == "mediapipe":
             self.start_udp_broadcast()
@@ -2558,6 +2571,9 @@ class StereoHandTrackerGUI(QMainWindow):
             event.ignore()
             return
         self.stop_udp_broadcast()
+        if self._capture_control is not None:
+            self._capture_control_timer.stop()
+            self._capture_control.close()
         event.accept()
 
 
