@@ -104,6 +104,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rows.append(("optitrack:illumination",
                              "binding ready; camera/hub capabilities checked on start" if lighting_api else
                              "binding upgrade required for lighting controls; preview remains available"))
+                sdk = cfg.optitrack_cam
+                timing_api = (getattr(sdk, "CAMERA_RECORDING_API_VERSION", 0) == 1
+                              and callable(getattr(getattr(sdk, "Frame", None), "timing", None))
+                              and callable(getattr(camera_type, "capture_info", None)))
+                sync_api = (getattr(sdk, "OPTIHUB_SYNC_CONTROL_API_VERSION", 0) == 1
+                            and all(callable(getattr(sdk, name, None)) for name in
+                                    ("get_sync_status", "configure_sync_preset", "configure_exposure_output")))
+                rows.append(("optitrack:frame-timing", "binding ready" if timing_api else
+                             "binding upgrade required for SDK frame metadata"))
+                rows.append(("optitrack:sync-control", "binding ready; hardware timing not tested" if sync_api else
+                             "binding upgrade required for OptiHub sync controls"))
             if not sdk_available:
                 rows.append(("optitrack:import-error", getattr(cfg, "SDK_IMPORT_ERROR", "unknown")))
                 rows.append(

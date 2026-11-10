@@ -85,11 +85,19 @@ def test_writer_failure_is_visible_and_manifest_incomplete(monkeypatch, tmp_path
     assert not manifest["complete"] and manifest["error"]
 
 
-def test_lossless_recording_and_frozen_calibration(tmp_path):
+@pytest.mark.parametrize("codec", ["MJPG", "FFV1"])
+def test_recording_and_frozen_calibration(tmp_path, codec):
+    if codec == "FFV1":
+        probe = cv2.VideoWriter(str(tmp_path/"codec-probe.avi"),
+                                cv2.VideoWriter_fourcc(*codec), 30., (64, 48))
+        available = probe.isOpened()
+        probe.release()
+        if not available:
+            pytest.skip("Installed OpenCV build cannot encode optional FFV1 video")
     calibration = tmp_path/'original.npz'
     np.savez(calibration, schema_version=2, quality_passed=True)
     original = calibration.read_bytes()
-    writer = recording.CameraRecording(tmp_path/'session', trial_name='Reach', codec='FFV1',
+    writer = recording.CameraRecording(tmp_path/'session', trial_name='Reach', codec=codec,
                                        calibration_path=calibration)
     rng = np.random.default_rng(52)
     frame = rng.integers(0, 255, (48, 64, 3), dtype=np.uint8)
@@ -99,12 +107,14 @@ def test_lossless_recording_and_frozen_calibration(tmp_path):
     calibration.write_bytes(b'changed later')
     manifest = json.loads((writer.directory/'manifest.json').read_text())
     assert (writer.directory/'calibration.npz').read_bytes() == original
-    assert manifest['calibration']['sha256'] and manifest['video_codec'] == 'FFV1'
+    assert manifest['calibration']['sha256'] and manifest['video_codec'] == codec
     video = cv2.VideoCapture(str(writer.directory/manifest['video_files']['0']))
     try:
         ok, saved = video.read()
         assert ok
-        np.testing.assert_array_equal(saved, frame)
+        assert saved.shape == frame.shape
+        if codec == 'FFV1':
+            np.testing.assert_array_equal(saved, frame)
     finally:
         video.release()
     assert rows(writer.directory/'control_events.jsonl')[0]['status'] == 'sent_unconfirmed'

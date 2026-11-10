@@ -14,9 +14,9 @@ import urllib.error
 import urllib.request
 import zipfile
 
-BUNDLE_URL = 'https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/download/optitrack-binding-v2/optitrack-binding-cp311-win_amd64.zip'
-BUNDLE_SHA256 = '96d55eacb452c4456d892c36c21deba60b41da85870de2c1cbf325d6dcdb4557'
-SOURCE_REVISION = '5f16cb67d024988a34314f47f8a5d7c294f2b8be'
+BUNDLE_URL = 'https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/download/optitrack-binding-sync-v1/optitrack-binding-cp311-win_amd64.zip'
+BUNDLE_SHA256 = '8be350efa5b8f673c0227f249513e61d76184dfffd90d9d5e36b9d4dd5ac3068'
+SOURCE_REVISION = '4c8a4e18b6f4dc8d5df803307a7760b77a351afe'
 SDK_REVISION = 'd0981e46b7f1838f7ac3af2ebc4f935ba763be6d'
 SDK_DLL_SHA256 = '428b412009be1efc9600d11c61c46af84b6ff03c2c1f166401ea35feda2a1ee8'
 BINDING = 'optitrack_cam.cp311-win_amd64.pyd'
@@ -97,10 +97,16 @@ with os.add_dll_directory(sys.argv[2]):
     sdk=importlib.import_module('optitrack_cam')
     assert Path(sdk.__file__).parent.resolve()==Path(sys.argv[1]).resolve()
     assert sdk.BINDING_API_VERSION==2
+    assert sdk.CAMERA_RECORDING_API_VERSION==1
+    assert sdk.OPTIHUB_SYNC_CONTROL_API_VERSION==1
+    for name in ('get_sync_status','configure_sync_preset','configure_exposure_output'):
+        assert callable(getattr(sdk,name)),name
+    assert callable(sdk.Frame.timing)
+    assert callable(sdk.Camera.capture_info)
     for name in ('get_intensity','min_intensity','max_intensity','set_intensity',
                  'is_high_power_supported','is_high_power_available','get_high_power','set_high_power'):
         assert callable(getattr(sdk.Camera,name)),name
-print('Native illumination binding verified without initializing cameras.')
+print('Native illumination, frame-timing and sync-control APIs verified without initializing cameras.')
 """
     completed = subprocess.run([sys.executable, '-B', '-c', code, str(staging), str(runtime)],
                                capture_output=True, text=True, timeout=30)
@@ -125,7 +131,7 @@ def install_bundle(runtime, payload):
     previous = binding.read_bytes()
     previous_manifest = manifest.read_bytes() if manifest.exists() else None
     if previous == files[BINDING] and previous_manifest == files[MANIFEST]:
-        print('Illumination binding API v2 is already installed.')
+        print('Sync-capable binding API v2 is already installed.')
         return runtime
     with tempfile.TemporaryDirectory(prefix='binding-upgrade-', dir=runtime) as folder:
         staging = Path(folder)
@@ -159,7 +165,7 @@ def install_bundle(runtime, payload):
                 # A failed atomic manifest replacement leaves its original contents intact.
             raise RuntimeError('Binding installation failed; previous binding preserved. '
                                'Close MAVIS/Python processes using it, then retry.') from exc
-    print('Installed illumination binding API v2; original binding backup:', backup)
+    print('Installed sync-capable binding API v2; original binding backup:', backup)
     print('SDK DLL, USB drivers and camera settings were not changed.')
     return runtime
 

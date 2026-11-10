@@ -126,7 +126,7 @@ and records the installed build hash. Runtime recovery will not downgrade an
 identified local v2 build. The CameraLibrary DLL is still checked against the
 original pinned hash.
 
-A small [prebuilt API v2 binding](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-v2)
+A small [prebuilt sync-capable binding](https://github.com/Jshulgach/Hand-Landmark-Tracker/releases/tag/optitrack-binding-sync-v1)
 is available separately for Windows/Python 3.11 x64. Close MAVIS, activate its
 environment, and run:
 
@@ -135,7 +135,11 @@ python external/setup_optitrack.py --upgrade-binding
 python -m mavis_track doctor --backend optitrack --gui
 ```
 
-This checks the pinned archive checksum and native imports before installation,
+The current ZIP supplies illumination API v2, camera-recording metadata API v1
+and OptiHub sync-control API v1, including exposure timing output. The upgrade
+requires Python 3.11 x64 and the already matched local CameraLibrary DLL.
+
+This checks the pinned archive checksum and all native capabilities before installation,
 preserves the original binding, and leaves the SDK DLL and USB drivers alone.
 For a downloaded/offline copy, use `--binding-zip PATH` instead. The ZIP contains
 only the extension, manifest, MAVIS license/third-party notices and pybind11
@@ -149,7 +153,7 @@ IDs/timestamps, camera identity/settings and OptiHub sync configuration reads.
 `OPTIHUB_SYNC_CONTROL_API_VERSION = 1` adds explicit Vicon external 50 Hz and
 internal 50 Hz presets through `configure_sync_preset()`. Mode changes read back
 SDK settings and attempt restoration on failure; input signal lock is not measured.
-Rebuild with the same helper for these additions; the earlier prebuilt v2 archive
-may only supply illumination controls. Video/host-time recording works with the
+Use the pinned sync-capable release above or rebuild with the same helper.
+The earlier `optitrack-binding-v2` archive supplies only illumination controls. Video/host-time recording works with the
 older binding. OptiHub 2 (2011) exposes no documented electrical input edge/level
 stream through this SDK. See [recording and sync](../docs/optitrack-recording.md).

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Pin the prebuilt Windows/Python 3.11 sync binding, verify frame-timing and
+  OptiHub control APIs during upgrade, and report capabilities in doctor.
+  Document compiler-free upgrades and hardware timing limitations.
+- Make UDP controller tests wait for packet delivery and check FFV1 availability
+  before the optional lossless-codec test, while verifying calibration snapshots
+  with both default MJPG and supported FFV1 recording.
+
 - Explain rejected calibration candidates with per-camera/stereo held-out
   maxima, 3D board metrics, limits and saved failure reasons; add candidate
   inspection and return a clear failure status without an expected-quality traceback.

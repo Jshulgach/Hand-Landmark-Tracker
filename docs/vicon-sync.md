@@ -21,9 +21,9 @@ trial files; alignment reports and synchronized review run after capture.
    with a scope. Select a sampling rate that resolves the shortest pulse;
    camera frame rate alone does not determine a sufficient analog rate.
 
-The SDK readback checks configuration, not electrical lock. The native `.pyd`
-must be rebuilt for the new controls; import tests and simulated SDK tests do not
-validate connected hardware. See [binding build instructions](optitrack-recording.md#build-the-extended-native-binding).
+The SDK readback checks configuration, not electrical lock. Install the current prebuilt sync-capable binding or rebuild the native extension
+for the new controls; import tests and simulated SDK tests do not
+validate connected hardware. See [binding build instructions](optitrack-recording.md#install-or-build-the-extended-native-binding).
 
 Official references: [Nexus output configuration](https://help.vicon.com/space/Nexus220/897715600/Vicon%2BConnectivity%2Bnodes),
 [Vicon GPO events](https://vicon-help.atlassian.net/wiki/spaces/Connect/pages/1611203),

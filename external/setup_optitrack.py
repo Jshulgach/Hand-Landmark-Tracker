@@ -124,7 +124,7 @@ def main(argv=None):
     group.add_argument('--runtime-dir', type=Path,
                        help='copy the matching runtime pair from another configured computer')
     group.add_argument('--check', action='store_true', help='verify interpreter and existing runtime checksums')
-    group.add_argument('--upgrade-binding', action='store_true', help='install the pinned illumination binding release')
+    group.add_argument('--upgrade-binding', action='store_true', help='install the pinned illumination/frame-timing/sync binding release')
     group.add_argument('--binding-zip', type=Path, help='install an offline copy of the pinned release ZIP')
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[1]
